@@ -200,7 +200,6 @@ function renderHome() {
     <section class="hero rise">
       <div class="eyebrow">Tendencia, riesgo y un plan</div>
       <h1 class="title">¿En qué <em>invertir</em> hoy?</h1>
-      <p class="lead">Escribe una empresa, fondo o criptomoneda del mundo. Te decimos si hoy conviene comprar, esperar o vender, con un plan y cuánto podrías ganar o perder.</p>
       ${searchBox()}
     </section>
     <div id="brief"></div>
@@ -406,9 +405,12 @@ function summaryText(a) {
   return `La tendencia está claramente en contra. Si la tienes, es momento de vender o proteger fuertemente; si no, evítala por ahora. ${base}`;
 }
 
-const MODEL_ICONS = { merton: "bolt", meanrev: "wave", realoptions: "tree", vasicek: "rate", herding: "crowd" };
-const TAB_ORDER = ["merton", "meanrev", "realoptions", "vasicek", "herding"];
-const TAB_SHORT = { merton: "Merton", meanrev: "Reversión", realoptions: "Opciones", vasicek: "Vasicek", herding: "Manada" }; // nombres cortos: en el celular caben los 5 modelos a la vez
+const MODEL_ICONS = { merton: "bolt", meanrev: "wave", realoptions: "tree", vasicek: "rate", herding: "crowd", gbm: "chart", bs: "shield", kou: "bolt", fractal: "wave" };
+const TAB_ORDER = ["merton", "meanrev", "realoptions", "vasicek", "herding", "gbm", "bs", "kou", "fractal"];
+const EXTRA_NAMES = { gbm: "Browniano geométrico (GBM)", bs: "Black–Scholes", kou: "Saltos de Kou", fractal: "Fractales y browniano fraccional" };
+const modelName = (k) => MODEL_NAMES[k] || EXTRA_NAMES[k];
+const modelOf = (a, k) => a.models[k] || a.extras?.[k] || { signal: 0, confidence: 0, available: false, headline: "No disponible", detail: "" };
+const TAB_SHORT = { merton: "Merton", meanrev: "Reversión", realoptions: "Opciones", vasicek: "Vasicek", herding: "Manada", gbm: "GBM", bs: "Black–Scholes", kou: "Kou", fractal: "Fractal" }; // nombres cortos: en el celular caben los 5 modelos a la vez
 
 
 // ----- Guía para principiantes: todo en palabras simples y en pesos, no en porcentajes ni jerga -----
@@ -596,7 +598,7 @@ async function renderDetail(sym) {
     ${C.priceFanChart({ series: a.series, fan: m.merton.fan, target: a.target, stop: a.stop, buy: a.priceBuy, S0: a.S0 })}</div>
 
   <div id="similar" class="rise" style="--i:6"></div>
-  <div class="tabs expert" id="tabs" role="tablist">${TAB_ORDER.map((k, i) => `<button class="tab ${i === 0 ? "on" : ""}" role="tab" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}" aria-label="${MODEL_NAMES[k]}">${ico(MODEL_ICONS[k])}<span class="l">${MODEL_NAMES[k]}</span><span class="s">${TAB_SHORT[k]}</span><i class="sig" style="background:${sigColor(m[k].signal || 0)}"></i></button>`).join("")}</div>
+  <div class="tabs expert" id="tabs" role="tablist">${TAB_ORDER.map((k, i) => `<button class="tab ${i === 0 ? "on" : ""}" role="tab" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}" aria-label="${modelName(k)}">${ico(MODEL_ICONS[k])}<span class="l">${modelName(k)}</span><span class="s">${TAB_SHORT[k]}</span><i class="sig" style="background:${sigColor(modelOf(a, k).signal || 0)}"></i></button>`).join("")}</div>
   <div id="panel" class="panel expert"></div>
   ${disclaimer()}`;
 
@@ -661,6 +663,22 @@ function contribRow(c) {
     <div style="position:relative;height:8px;border-radius:99px;background:var(--chip);margin-top:6px"><i style="position:absolute;top:0;bottom:0;border-radius:99px;background:${sigColor(c.signal)};${c.value >= 0 ? `left:50%;width:${w}%` : `right:50%;width:${w}%`};transition:width 1s var(--spring)"></i><i style="position:absolute;left:50%;top:-3px;bottom:-3px;width:2px;background:var(--faint);opacity:.6"></i></div></div>`;
 }
 
+function hurstChart(m) {
+  const pts = m.dfa, W = 720, Hh = 230, L = 46, R = 14, T = 12, B = 30;
+  const xs = pts.map((p) => Math.log10(p.s)), ys = pts.map((p) => Math.log10(p.F));
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), yMid = (Math.min(...ys) + Math.max(...ys)) / 2, span = Math.max(0.6, (Math.max(...ys) - Math.min(...ys)) * 1.35);
+  const y0 = yMid - span / 2, y1 = yMid + span / 2;
+  const sx = (v) => L + ((v - x0) / (x1 - x0 || 1)) * (W - L - R), sy = (v) => T + (1 - (v - y0) / (y1 - y0)) * (Hh - T - B);
+  const fitY = (lx) => (m.fit.a + m.fit.b * lx * Math.LN10) / Math.LN10; // recta ajustada en log10
+  const mx = (x0 + x1) / 2, ref = (lx) => fitY(mx) + 0.5 * (lx - mx);
+  const dots = xs.map((x, i) => `<circle cx="${sx(x).toFixed(1)}" cy="${sy(ys[i]).toFixed(1)}" r="4.5" fill="var(--blue)"/>`).join("");
+  const ticks = pts.map((p, i) => `<text class="pxc-xtx" x="${sx(xs[i]).toFixed(1)}" y="${Hh - 10}" text-anchor="middle">${p.s}</text>`).join("");
+  return `<svg class="pxc-svg" viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Exponente de Hurst ${f2(m.hurst, 2)}">
+    <line class="pxc-ref" x1="${sx(x0)}" x2="${sx(x1)}" y1="${sy(ref(x0)).toFixed(1)}" y2="${sy(ref(x1)).toFixed(1)}"/>
+    <line x1="${sx(x0)}" x2="${sx(x1)}" y1="${sy(fitY(x0)).toFixed(1)}" y2="${sy(fitY(x1)).toFixed(1)}" stroke="var(--orange)" stroke-width="2.2"/>
+    ${dots}${ticks}<text class="pxc-xtx" x="${L}" y="${T + 10}">pendiente = H = ${f2(m.hurst, 2)} · punteada = 0,5</text>
+    <text class="pxc-ytx" x="${W - R}" y="${T + 10}" text-anchor="end">eje: días por ventana</text></svg>`;
+}
 const stat = (k, v) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`;
 const head = (m, name) => `<div class="glass card"><div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px"><div><div class="eyebrow">${name}</div><h3 style="font-size:20px;letter-spacing:-.02em;margin-top:4px">${esc(m.headline)}</h3></div><div class="muted" style="font-size:13px;text-align:right">Señal <b style="color:${sigColor(m.signal)}">${m.signal >= 0 ? "+" : ""}${m.signal.toFixed(2).replace(".", ",")}</b><br>Confianza ${pctPlain(m.confidence)}</div></div><p class="explain" style="margin-top:10px">${esc(m.detail)}</p>`;
 const f2 = (x, d = 2) => (x == null || !isFinite(x) ? "—" : x.toFixed(d).replace(".", ","));
@@ -683,7 +701,45 @@ function tidyPanel(p) {
 }
 
 function panelFor(k, a) {
-  const m = a.models[k];
+  const m = modelOf(a, k);
+  if (!m.available && ["gbm", "bs", "kou", "fractal"].includes(k)) return head(m, EXTRA_NAMES[k]) + `</div>`;
+  if (k === "gbm") {
+    const mt = a.models.merton, ko = a.extras.kou;
+    const row = (t, g, me, kk) => `<div class="r bt-r"><span>${t}</span><span class="num">${g}</span><span class="num">${me}</span><span class="num">${kk}</span></div>`;
+    return head(m, "Movimiento browniano geométrico (GBM)") + `
+      <div class="stats">${stat("Tendencia anual (μ)", pct(m.mu, 1))}${stat("Volatilidad anual (σ)", pctPlain(m.sigma, 1))}${stat("Probabilidad de subir", pctPlain(m.probUp, 0))}${stat("Rango p10–p90", `${fmtPrice(m.lo)} – ${fmtPrice(m.hi)}`)}
+      ${stat("Prob. caer más de 10 %", pctPlain(m.probDown10, 1))}${stat("Pérdida media peor 5 %", pct(m.es5, 1))}${stat("Curtosis (normal = 3)", f2(m.kurt, 1))}${stat("¿Rendimientos normales?", m.normal ? "Sí" : `No (JB ${f2(m.jb, 0)})`)}</div></div>
+    <div class="glass card" style="margin-top:18px"><h3 style="font-size:17px">El mismo riesgo visto por tres modelos</h3><p class="muted" style="font-size:13px;margin:2px 0 10px">El GBM no tiene saltos; Merton agrega saltos simétricos y Kou, saltos distintos para subidas y caídas.</p>
+      <div class="rank bt">${`<div class="r h bt-r"><span></span><span class="num">GBM</span><span class="num">Merton</span><span class="num">Kou</span></div>`}
+      ${row("Prob. caer más de 10 %", pctPlain(m.probDown10, 1), pctPlain(mt.probDown10, 1), ko?.available ? pctPlain(ko.probDown10, 1) : "—")}
+      ${row("Pérdida media peor 5 %", pct(m.es5, 1), pct(mt.es5, 1), ko?.available ? pct(ko.es5, 1) : "—")}
+      ${row("Probabilidad de subir", pctPlain(m.probUp, 0), pctPlain(mt.probUp, 0), ko?.available ? pctPlain(ko.probUp, 0) : "—")}</div></div>
+    <div class="glass card" style="margin-top:18px"><h4 class="eyebrow">Cómo leerlo</h4><p class="explain">Es el modelo base de las finanzas: el precio crece con una tendencia y vibra al azar, con cambios que siguen una campana normal. En Horizon sirve de <b>punto de comparación</b>: la diferencia con Merton y Kou muestra cuánto riesgo aportan los saltos. Su probabilidad y su rango salen de forma exacta, sin simular.</p>
+      <div class="formula">dS = μ·S·dt + σ·S·dW · ln(S_T/S₀) ~ N((μ − σ²/2)T, σ²T)</div></div>`;
+  }
+  if (k === "bs") {
+    return head(m, "Black–Scholes (1973)") + `
+      <div class="stats">${stat("Volatilidad anual", pctPlain(m.sigma, 1))}${stat(`Movimiento típico en ${m.H} días`, `±${pctPlain(m.move, 0)}`)}${stat("Opción de compra (al precio de hoy)", `${fmtPrice(m.call)} · ${pctPlain(m.call / m.S0, 1)}`)}${stat("Opción de venta (al precio de hoy)", `${fmtPrice(m.put)} · ${pctPlain(m.put / m.S0, 1)}`)}
+      ${stat("Seguro contra caídas de 10 %", `${fmtPrice(m.put90)} · ${pctPlain(m.put90 / m.S0, 1)}`)}${stat("Apuesta a subir 10 %", `${fmtPrice(m.call110)} · ${pctPlain(m.call110 / m.S0, 1)}`)}${stat("Delta de la opción de compra", f2(m.delta, 2))}${stat("Prob. de terminar arriba (neutral al riesgo)", pctPlain(m.probITM, 0))}</div></div>
+    <div class="glass card" style="margin-top:18px"><h4 class="eyebrow">Cómo leerlo</h4><p class="explain">Black–Scholes usa el GBM para ponerle precio a una opción. En Horizon responde <b>cuánto cuesta el riesgo</b>: cuánto pagarías por asegurarte contra una caída (opción de venta) o por apostar a una subida (opción de compra). No opina si el precio sube o baja, por eso su señal es neutral. En la pestaña de Merton se compara su precio con el de un modelo con saltos.</p>
+      <div class="formula">C = S·N(d₁) − K·e^(−rT)·N(d₂) · d₁ = [ln(S/K) + (r + σ²/2)T] / (σ√T) · d₂ = d₁ − σ√T</div></div>`;
+  }
+  if (k === "kou") {
+    return head(m, "Saltos de Kou (2002)") + `
+      <div class="stats">${stat("Saltos por año", f2(m.lamYear, 1))}${stat("Subidas bruscas (3 años)", `${m.nUp} · ${pct(m.upSize, 1)} en promedio`)}${stat("Caídas bruscas (3 años)", `${m.nDown} · ${pct(-m.downSize, 1)} en promedio`)}${stat("Prob. de que un salto sea hacia arriba (p)", pctPlain(m.p, 0))}
+      ${stat("Rango p10–p90", `${fmtPrice(m.q.p10)} – ${fmtPrice(m.q.p90)}`)}${stat("Probabilidad de subir", pctPlain(m.probUp, 0))}${stat("Prob. caer más de 10 %", pctPlain(m.probDown10, 1))}${stat("Pérdida media peor 5 %", pct(m.es5, 1))}</div></div>
+    <div class="glass chartcard"><h3>Distribución del rendimiento a ${m.H} días</h3><div class="hint">Barras: 20.000 escenarios con saltos de Kou. Línea naranja: lo que diría un modelo sin saltos. En rojo, las caídas de más de 10 %.</div>${C.tailChart(m)}</div>
+    <div class="glass card" style="margin-top:18px"><h4 class="eyebrow">Cómo leerlo</h4><p class="explain">Como Merton, suma saltos al GBM, pero cada salto sigue una <b>exponencial doble</b>: las subidas y las caídas bruscas pueden tener tamaños y frecuencias distintas. En Horizon complementa a Merton: muestra si esta acción <b>cae más fuerte de lo que sube</b>. Los saltos se detectan como los días que se alejan más de 3 desviaciones robustas de lo normal.</p>
+      <div class="formula">dS/S = μ·dt + σ·dW + d(Σ(Vᵢ − 1)) · ln V ~ p·Exp(η₁) con +, (1 − p)·Exp(η₂) con −</div></div>`;
+  }
+  if (k === "fractal") {
+    return head(m, "Fractales y browniano fraccional") + `
+      <div class="stats">${stat("Exponente de Hurst (DFA)", f2(m.hurst, 2))}${stat("Hurst por R/S", f2(m.hurstRS, 2))}${stat("Dimensión fractal (D = 2 − H)", f2(m.D, 2))}${stat("Comportamiento", m.kind[0].toUpperCase() + m.kind.slice(1))}
+      ${stat("Ajuste del gráfico log-log (R²)", f2(m.r2, 2))}${stat("Rango con browniano fraccional", `${fmtPrice(m.lo)} – ${fmtPrice(m.hi)}`)}${stat("Frente al rango del GBM", (m.widen >= 0 ? "+" : "−") + pctPlain(Math.abs(m.widen), 0))}${stat("Últimos 6 meses", pct(Math.exp(m.ret6) - 1, 1))}</div></div>
+    <div class="glass chartcard"><h3>¿Tiene memoria el precio?</h3><div class="hint">Cada punto compara el tamaño de la ventana con la fluctuación que hay dentro de ella (escala logarítmica). La pendiente es el exponente de Hurst: la línea punteada es 0,5, el azar puro.</div>${hurstChart(m)}</div>
+    <div class="glass card" style="margin-top:18px"><h4 class="eyebrow">Cómo leerlo</h4><p class="explain">Los precios tienen rasgos <b>fractales</b>: se ven parecidos en minutos, días o meses. El <b>exponente de Hurst</b> mide su memoria: 0,5 es una caminata al azar (lo que suponen el GBM y Black–Scholes); más de 0,5, tendencias que continúan; menos de 0,5, movimientos que se devuelven. El <b>browniano fraccional</b> generaliza el GBM con esa memoria: la dispersión crece como t^H en vez de t^0,5. En Horizon, si hay memoria sigue la dirección de los últimos 6 meses; si se devuelve, espera un rebote.</p>
+      <div class="formula">F(s) ∝ s^H (DFA) · E[R/S] ∝ n^H · D = 2 − H · Var[B_H(t)] = σ²·t^(2H)</div></div>`;
+  }
   if (k === "merton") {
     return head(m, "Saltos de Merton (1976)") + `
       <div class="stats">${stat("Saltos por año", f2(m.annual.lam, 1))}${stat("Tamaño medio del salto", pct(m.fit.k, 1))}${stat("Volatilidad normal (σ)", pctPlain(m.annual.sigma, 1))}${stat("Volatilidad total", pctPlain(m.totalVolYear, 1))}
@@ -1095,8 +1151,12 @@ function renderMetodo() {
     ["realoptions", "tree", "var(--teal)", "Opciones reales", "Invertir es como ejercer una opción: esperar y tener una salida preparada tienen valor.", "Diferir = Call americana(V, I) · Abandonar = Put americana(V, (1−L)I)", "Un árbol binomial (CRR) con 80 pasos valora la opción de diferir y la de abandonar. De ahí salen el precio máximo de compra y el piso de protección, con el costo de esperar igual al rendimiento esperado que se deja de ganar.", "Está adaptado a acciones (reversibles): el margen exigido se limita a la volatilidad del horizonte. Es un modelo de apoyo para entrar y salir, no un pronóstico."],
     ["vasicek", "rate", "var(--blue)", "Vasicek (1977)", "Las tasas de interés siempre tienden a volver a un promedio de equilibrio.", "dr = a(b − r)dt + σ dW", "Ajustamos Vasicek a los bonos del Tesoro (3 meses, 5, 10 y 30 años) con regresión AR(1) exacta. Proyectamos las tasas, obtenemos la tasa libre de riesgo esperada que usan los demás modelos, medimos la sensibilidad de la acción a las tasas y valoramos bonos con fórmula cerrada.", "Permite tasas negativas y no incluye prima de plazo. Para todos los mercados se usa como referencia la curva de EE. UU. porque Yahoo no ofrece curvas de otros países."],
     ["herding", "crowd", "var(--green)", "Comportamiento en manada", "A veces los inversionistas se imitan entre sí y los precios se mueven en bloque.", "CSAD = α + γ₁|Rm| + γ₂Rm² + ε", "Con una canasta de acciones de la misma región (hasta 25) calculamos la dispersión diaria de rendimientos y la regresión de Chang, Cheng y Khorana con errores robustos. Si γ₂ es negativo y significativo hay manada; según la dirección del mercado resta (burbuja) o suma (pánico).", "Es un fenómeno ocasional: la mayoría de los días no hay evidencia, y entonces el modelo no empuja el veredicto. La canasta usa datos guardados al compilar la aplicación."],
+    ["gbm", "chart", "var(--blue)", "Browniano geométrico (GBM)", "La base: el precio crece con una tendencia y vibra al azar, sin saltos.", "dS = μS·dt + σS·dW", "Estimamos tendencia y volatilidad con 3 años de datos y calculamos en forma exacta la probabilidad de subir, el rango y el riesgo de cola. Sirve para comparar: lo que el GBM no ve son los saltos.", "Supone rendimientos normales; casi ninguna acción los tiene (la prueba de Jarque–Bera suele rechazarlo), por eso subestima las caídas bruscas."],
+    ["bs", "shield", "var(--teal)", "Black–Scholes (1973)", "Le pone precio al riesgo: cuánto cuesta asegurarse contra una caída o apostar a una subida.", "C = S·N(d₁) − K·e^(−rT)·N(d₂)", "Con la volatilidad del último año valoramos opciones de compra y venta al horizonte elegido, el seguro contra caídas de 10 % y el movimiento típico esperado.", "Hereda los supuestos del GBM (volatilidad constante, sin saltos). No opina sobre la dirección."],
+    ["kou", "bolt", "var(--orange)", "Saltos de Kou (2002)", "Como Merton, pero las caídas y las subidas bruscas pueden tener tamaños distintos.", "ln V ~ p·Exp(η₁) − (1 − p)·Exp(η₂)", "Detectamos los saltos (días a más de 3 desviaciones robustas), estimamos por separado frecuencia y tamaño de subidas y caídas, y simulamos 20.000 escenarios.", "Con pocos saltos en la muestra las estimaciones son inestables; por eso su confianza es menor."],
+    ["fractal", "wave", "var(--green)", "Fractales y browniano fraccional", "¿El precio tiene memoria? El exponente de Hurst lo mide.", "F(s) ∝ s^H · D = 2 − H", "Calculamos el exponente de Hurst con DFA y con R/S, la dimensión fractal y un rango con browniano fraccional (dispersión que crece como t^H). Si hay memoria sigue la tendencia; si se devuelve, espera rebote.", "Con 3 años de datos diarios el exponente tiene error de varias centésimas; valores entre 0,45 y 0,55 se tratan como azar."],
   ];
-  view.innerHTML = `<section class="hero rise"><div class="eyebrow">Transparencia</div><h1 class="title">Cómo <em>decide</em> Horizon</h1><p class="lead">La tendencia decide la dirección y cinco modelos ponen los precios y el riesgo. Abajo está la prueba con 10 años de datos.</p></section>
+  view.innerHTML = `<section class="hero rise"><div class="eyebrow">Transparencia</div><h1 class="title">Cómo <em>decide</em> Horizon</h1><p class="lead">La tendencia decide la dirección y los modelos ponen los precios y el riesgo. Abajo está la prueba con 10 años de datos.</p></section>
   ${cards.map(([k, i, c, t, idea, f, how, lim], n) => `<div class="glass mcard rise" style="--c:${c};--i:${n}"><h3><span class="ico">${ico(i)}</span>${t}</h3><p class="explain"><b>${idea}</b></p><details class="how"><summary>Cómo funciona</summary><div class="formula">${f}</div><h4>Cómo lo usamos</h4><p class="explain">${how}</p><h4>Límites</h4><p class="explain">${lim}</p></details></div>`).join("")}
   <div class="glass mcard rise"><h3><span class="ico" style="--c:var(--blue)">${ico("trophy")}</span>Cómo se arma el veredicto</h3>
     <p class="explain"><b>La tendencia decide si comprar, esperar o vender. Los cinco modelos ponen el rango, el límite de pérdida, la zona de ganancia y el nivel de riesgo.</b></p><details class="how"><summary>Ver fórmulas, umbrales y datos</summary><h4>Versión actual: la tendencia</h4><p class="explain">Desde el backtest, la dirección del veredicto la decide la <b>tendencia</b> (momentum de 12 meses frente a su canasta regional, fuerza relativa a 6 meses y si subió o bajó en el año, con un castigo si está más nerviosa de lo normal). Umbrales: Comprar ≥ 0,45 · Comprar de a poco ≥ 0,20 · Esperar · Vender una parte ≤ −0,20 · Vender ≤ −0,45. Los 5 modelos fijan el rango, el precio objetivo, la compra máxima, el piso de protección y el nivel de riesgo.</p><h4>Opinión de los 5 modelos (versión 1, hoy segunda opinión)</h4><div class="formula">S = Σ wᵢ · cᵢ · sᵢ / Σ wᵢ · pesos: ${Object.entries(WEIGHTS).map(([k, w]) => `${MODEL_NAMES[k]} ${Math.round(w * 100)} %`).join(", ")}</div>

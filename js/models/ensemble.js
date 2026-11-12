@@ -7,6 +7,7 @@ import { analyzeMerton } from "./merton.js";
 import { analyzeMeanReversion } from "./meanreversion.js";
 import { analyzeHerding } from "./herding.js";
 import { analyzeRealOptions } from "./realoptions.js";
+import { analyzeGBM, analyzeBlackScholes, analyzeKou, analyzeFractal } from "./extra.js";
 import { computeFactors, computeTrend, marketIndex, featureVector, predictML } from "./factors.js";
 
 export const WEIGHTS = { merton: 0.30, meanrev: 0.26, realoptions: 0.20, vasicek: 0.14, herding: 0.10 };
@@ -47,6 +48,14 @@ export function analyzeAll({ series, rates, universe, region, horizonDays = 63, 
   const realoptions = analyzeRealOptions({ S0, sigma: merton.totalVolYear, rBar: rf, eView, rho, horizonDays });
 
   const models = { merton, meanrev, realoptions, vasicek, herding };
+  // modelos complementarios: se muestran y opinan, pero no entran en el veredicto ni en la opinión de los 5
+  const safe = (f) => { try { return f(); } catch (e) { return { available: false, signal: 0, confidence: 0, headline: "No se pudo calcular con estos datos.", detail: "" }; } };
+  const extras = {
+    gbm: safe(() => analyzeGBM(prices, { horizonDays, rho })),
+    bs: safe(() => analyzeBlackScholes(prices, { horizonDays, rf })),
+    kou: safe(() => analyzeKou(prices, { horizonDays, rho })),
+    fractal: safe(() => analyzeFractal(prices, { horizonDays, rho })),
+  };
   let num = 0, den = 0, agreeW = 0, activeW = 0;
   const contrib = [];
   for (const [k, w] of Object.entries(WEIGHTS)) {
@@ -91,7 +100,7 @@ export function analyzeAll({ series, rates, universe, region, horizonDays = 63, 
   const ml = features && mlModel ? predictML(mlModel, features) : null;
 
   return {
-    factors, features, ml, trend, score5, verdict5: verdictFor(score5, riskLevel, { buy: 0.30, accumulate: 0.12 }),
+    extras, factors, features, ml, trend, score5, verdict5: verdictFor(score5, riskLevel, { buy: 0.30, accumulate: 0.12 }),
     symbol: series.sym, name: series.name, currency: series.cur, S0, horizonDays, rf, erp,
     models, contrib, score: S, confidence, agreement, verdict, riskLevel,
     target, expReturn: merton.expReturn, probUp: merton.probUp,
