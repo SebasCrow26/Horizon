@@ -66,12 +66,14 @@ async function fetchJSON(url, ms = 9000) {
   } finally { clearTimeout(to); }
 }
 
+// En GitHub Pages no existe el proxy /yahoo de Netlify: ahí solo se usa el Cloudflare Worker de config.js
+const ON_PAGES = typeof location !== "undefined" && /\.github\.io$/i.test(location.hostname);
 function liveBases() {
-  const b = ["/yahoo"];
+  const b = ON_PAGES ? [] : ["/yahoo"];
   if (CFG.PROXY_URL) b.push(CFG.PROXY_URL.replace(/\/$/, ""));
   return b;
 }
-const liveAllowed = () => Date.now() >= live.disabledUntil;
+const liveAllowed = () => liveBases().length > 0 && Date.now() >= live.disabledUntil; // sin proxy disponible = sin conexión
 function liveFailed() { if (++live.fails >= 2) { live.disabledUntil = Date.now() + 5 * 60e3; live.fails = 0; } }
 function liveWorked() { live.fails = 0; live.disabledUntil = 0; }
 export const liveStatus = () => ({ live: liveAllowed(), snapshot: !!snapshot });
