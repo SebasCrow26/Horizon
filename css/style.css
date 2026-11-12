@@ -790,3 +790,4 @@ a.br-l:active { opacity: .6; }
 .jr-tools { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.25rem .25rem 0; }
 .jr-tools label { cursor: pointer; }
 .bt-r .pos2, .bt-r .pos1 { color: var(--green); font-weight: 600; } .bt-r .neu { color: var(--orange); font-weight: 600; } .bt-r .neg1, .bt-r .neg2 { color: var(--red); font-weight: 600; }
+.g-votes { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: .75rem; }

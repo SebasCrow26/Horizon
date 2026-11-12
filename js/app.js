@@ -306,7 +306,7 @@ function renderTop(results) {
   const hist = track?.byVerdict?.find((x) => x.key === best.verdict.key);
   const box = $("#top");
   if (!box) return;
-  box.innerHTML = `<h2 class="sec">La más recomendada de tu lista <small>la de tendencia más fuerte, con el riesgo medido por los 5 modelos</small></h2>
+  box.innerHTML = `<h2 class="sec">La más recomendada de tu lista <small>la de tendencia más fuerte, con el riesgo medido por los 9 modelos</small></h2>
     <div class="glass card interactive hero-card rise" data-href="#/t/${encodeURIComponent(best.symbol)}">
       <div><div class="eyebrow">${esc(best.symbol)} · ${esc(best.name)}</div>
         <div class="big ${best.verdict.tone}">${esc(best.verdict.label)}</div>
@@ -365,7 +365,7 @@ async function renderDescubrir() {
 // ----- Ranking -----
 async function renderRanking() {
   currentRoute = "ranking"; updateNav("ranking");
-  view.innerHTML = `<section class="hero rise"><div class="eyebrow">Comparador</div><h1 class="title">El <em>ranking</em> de tu lista</h1><p class="lead">Ordenado por la señal de tendencia, de la más fuerte a la más débil. El rango y el riesgo salen de los 5 modelos.</p></section>
+  view.innerHTML = `<section class="hero rise"><div class="eyebrow">Comparador</div><h1 class="title">El <em>ranking</em> de tu lista</h1><p class="lead">Ordenado por la señal de tendencia, de la más fuerte a la más débil. El rango y el riesgo salen de los modelos financieros.</p></section>
     <div class="rank" id="rank"><div class="skeleton" style="height:70px;border-radius:24px"></div></div>${disclaimer()}`;
   const my = routeToken;
   if (!state.watch.length) {
@@ -425,7 +425,7 @@ const GUIDE = {
   sell: ["Mejor no comprarla ahora", () => "La tendencia está claramente en contra. Si la tienes, considera salir."],
 };
 const GLOSSARY = [
-  ["Veredicto", "La recomendación final: la tendencia dice la dirección y los 5 modelos ponen los precios y el riesgo."],
+  ["Veredicto", "La recomendación final: la tendencia dice la dirección y los 9 modelos ponen los precios y el riesgo."],
   ["Probabilidad de subir", "De cada 10 veces que se repitiera una situación parecida, en cuántas el precio terminaría más alto que hoy. No es una promesa."],
   ["Peores y mejores 1 de 10", "Casi siempre el resultado queda entre ambos extremos. Una de cada diez veces puede ser peor o mejor."],
   ["Piso de protección", "Precio al que conviene salir si las cosas van mal, para no perder más. Es tu límite de pérdida."],
@@ -483,12 +483,12 @@ function simpleCard(a) {
   const plan = buildPlan(a, state.amount);
   const lab = { up: "A favor", down: "En contra", flat: "Neutral" };
   const tv = factorNotes(a.factors).map((n) => ({ t: n.up > 0 ? "up" : n.up < 0 ? "down" : "flat", text: n.text }));
-  const sigs = a.contrib.map((c) => ({ n: TAB_SHORT[c.key], t: c.signal >= 0.1 ? "up" : c.signal <= -0.1 ? "down" : "flat" }));
+  const sigs = [...a.contrib.map((c) => ({ n: TAB_SHORT[c.key], s: c.signal })), ...["gbm", "kou", "fractal"].filter((k) => a.extras?.[k]?.available).map((k) => ({ n: TAB_SHORT[k], s: a.extras[k].signal }))].map((x) => ({ n: x.n, t: x.s >= 0.1 ? "up" : x.s <= -0.1 ? "down" : "flat" }));
   const ten = Math.round(a.probUp * 10);
   const hz = horizonLabel(a.horizonDays);
   return `
   <div class="row rise" style="--i:1;margin:0 6px 14px;justify-content:space-between;flex-wrap:wrap;gap:10px">
-    <div class="seg" id="mode" role="group" aria-label="Nivel de detalle"><i class="ind"></i><a href="javascript:void(0)" data-m="simple" class="${state.mode === "simple" ? "on" : ""}">Simple</a><a href="javascript:void(0)" data-m="full" class="${state.mode === "full" ? "on" : ""}">Ver los 5 modelos</a></div>
+    <div class="seg" id="mode" role="group" aria-label="Nivel de detalle"><i class="ind"></i><a href="javascript:void(0)" data-m="simple" class="${state.mode === "simple" ? "on" : ""}">Simple</a><a href="javascript:void(0)" data-m="full" class="${state.mode === "full" ? "on" : ""}">Ver los 9 modelos</a></div>
   </div>
   <section class="glass guide rise" style="--i:2" aria-label="En pocas palabras">
     <div class="g-label">En pocas palabras · a ${hz}</div>
@@ -504,8 +504,8 @@ function simpleCard(a) {
     <details class="how g-more"><summary>¿En qué se basa?</summary>
       <h4 class="g-h">La tendencia decide la dirección</h4>
       <div class="g-trend">${tv.map((x) => `<div class="tv ${x.t}"><i></i><span>${esc(x.text)}</span><em>${lab[x.t]}</em></div>`).join("")}</div>
-      <h4 class="g-h">Los 5 modelos miden el riesgo y los precios</h4>
-      <p class="g-sum">El rango, el límite de pérdida y la zona de ganancia salen de los saltos de Merton, la reversión a la media y las opciones reales. En la prueba de 10 años, el rango acertó ${track?.coverage ? Math.round(track.coverage.inside * 100) : 82} de cada 100 veces. Su opinión sobre la dirección hoy: <b class="${a.verdict5.tone}">${esc(a.verdict5.label)}</b> (no anticipaba bien la dirección, por eso ya no decide).</p>
+      <h4 class="g-h">Los modelos miden el riesgo y los precios</h4>
+      <p class="g-sum">El rango, el límite de pérdida y la zona de ganancia salen de los saltos de Merton, la reversión a la media y las opciones reales. En la prueba de 10 años, el rango acertó ${track?.coverage ? Math.round(track.coverage.inside * 100) : 82} de cada 100 veces. La opinión combinada de Merton, reversión, opciones reales, Vasicek y manada hoy: <b class="${a.verdict5.tone}">${esc(a.verdict5.label)}</b> (no anticipaba bien la dirección, por eso ya no decide). GBM, Kou y fractales se muestran como referencia; Black–Scholes pone precio al riesgo.</p>
       <div class="g-votes" aria-label="Qué ve cada modelo">${sigs.map((x) => `<span class="vote ${x.t}"><i></i>${x.n}<em>${{ up: "Sube", down: "Baja", flat: "Neutral" }[x.t]}</em></span>`).join("")}</div>
       <h4 class="g-h">Noticias</h4>
       <p class="g-sum" id="g-news">Cargando el tono de las noticias…</p>
@@ -573,7 +573,7 @@ async function renderDetail(sym) {
       <div class="big ${a.verdict.tone}">${esc(a.verdict.label)}</div>
       <p class="explain">${summaryText(a)}</p>
       ${C.gauge(a.score)}
-      <div class="row muted" style="font-size:13px;gap:18px;flex-wrap:wrap"><span>Opinión de los 5 modelos <b class="${a.verdict5.tone}">${esc(a.verdict5.label)}</b></span><span>Señal de tendencia <b style="color:var(--text)">${a.score >= 0 ? "+" : ""}${a.score.toFixed(2).replace(".", ",")}</b></span><span>Acuerdo entre los 5 modelos <b style="color:var(--text)">${pctPlain(a.agreement)}</b></span><span>Confianza <b style="color:var(--text)">${pctPlain(a.confidence)}</b></span></div>
+      <div class="row muted" style="font-size:13px;gap:18px;flex-wrap:wrap"><span>Opinión combinada de los modelos <b class="${a.verdict5.tone}">${esc(a.verdict5.label)}</b></span><span>Señal de tendencia <b style="color:var(--text)">${a.score >= 0 ? "+" : ""}${a.score.toFixed(2).replace(".", ",")}</b></span><span>Acuerdo entre modelos <b style="color:var(--text)">${pctPlain(a.agreement)}</b></span><span>Confianza <b style="color:var(--text)">${pctPlain(a.confidence)}</b></span></div>
     </div>
     <div class="kpis">
       ${kpi("Probabilidad de subir", `<span data-to="${(a.probUp * 100).toFixed(1)}" data-dec="0" data-suf=" %">0 %</span>`, `en ${a.horizonDays} días (saltos de Merton)`)}
@@ -590,8 +590,10 @@ async function renderDetail(sym) {
       <div class="reasons">${factorNotes(a.factors).map((n) => `<div class="reason"><span class="dot" style="background:${n.up > 0 ? "var(--green)" : n.up < 0 ? "var(--red)" : "var(--faint)"}"></span><div><b>Tendencia · ${({ mom12: "último año", regime: "su mercado", relStr: "frente a su mercado", volRatio: "nervios" })[n.key] || ""}</b>${esc(n.text)}</div></div>`).join("")}${a.reasons.map((r) => `<div class="reason"><span class="dot" style="background:${sigColor(r.signal)}"></span><div><b>${esc(r.name)} · señal ${r.signal >= 0 ? "+" : ""}${r.signal.toFixed(2).replace(".", ",")}</b>${esc(r.text)}</div></div>`).join("")}</div>
       ${a.flags.length ? `<div class="flags">${a.flags.map((f) => `<div class="flag">${ico("shield")}<span>${esc(f)}</span></div>`).join("")}</div>` : ""}
     </div>
-    <div class="glass card rise" style="--i:4"><h3 style="font-size:17px">Qué opina cada uno de los 5 modelos</h3><p class="muted" style="font-size:13px;margin:2px 0 12px">Segunda opinión: desde el backtest ya no deciden la dirección. Barra a la derecha = sube; a la izquierda = baja.</p>
-      ${a.contrib.map((c) => contribRow(c)).join("")}</div>
+    <div class="glass card rise" style="--i:4"><h3 style="font-size:17px">Qué opina cada modelo</h3><p class="muted" style="font-size:13px;margin:2px 0 12px">Segunda opinión: desde el backtest ya no deciden la dirección. Barra a la derecha = sube; a la izquierda = baja. Black–Scholes no opina sobre la dirección.</p>
+      ${a.contrib.map((c) => contribRow(c)).join("")}
+      <p class="muted" style="font-size:12px;margin:14px 0 0">Sin peso en la opinión combinada (se muestran como referencia):</p>
+      ${["gbm", "bs", "kou", "fractal"].map((k) => { const m = modelOf(a, k); return m.available ? contribRow({ name: EXTRA_NAMES[k], signal: m.signal || 0, confidence: m.confidence || 0, weight: 0, value: (m.signal || 0) * (m.confidence || 0) * 0.3 }) : ""; }).join("")}</div>
   </div>
 
   <div class="glass chartcard expert rise" style="--i:5"><h3>Precio y proyección a ${a.horizonDays} días</h3><div class="hint">La zona azul es el rango probable según el modelo de saltos de Merton (más oscura: 25–75 %; clara: 10–90 %). Las líneas marcan el objetivo, la compra máxima y el piso de protección.</div>
@@ -1159,7 +1161,7 @@ function renderMetodo() {
   view.innerHTML = `<section class="hero rise"><div class="eyebrow">Transparencia</div><h1 class="title">Cómo <em>decide</em> Horizon</h1><p class="lead">La tendencia decide la dirección y los modelos ponen los precios y el riesgo. Abajo está la prueba con 10 años de datos.</p></section>
   ${cards.map(([k, i, c, t, idea, f, how, lim], n) => `<div class="glass mcard rise" style="--c:${c};--i:${n}"><h3><span class="ico">${ico(i)}</span>${t}</h3><p class="explain"><b>${idea}</b></p><details class="how"><summary>Cómo funciona</summary><div class="formula">${f}</div><h4>Cómo lo usamos</h4><p class="explain">${how}</p><h4>Límites</h4><p class="explain">${lim}</p></details></div>`).join("")}
   <div class="glass mcard rise"><h3><span class="ico" style="--c:var(--blue)">${ico("trophy")}</span>Cómo se arma el veredicto</h3>
-    <p class="explain"><b>La tendencia decide si comprar, esperar o vender. Los cinco modelos ponen el rango, el límite de pérdida, la zona de ganancia y el nivel de riesgo.</b></p><details class="how"><summary>Ver fórmulas, umbrales y datos</summary><h4>Versión actual: la tendencia</h4><p class="explain">Desde el backtest, la dirección del veredicto la decide la <b>tendencia</b> (momentum de 12 meses frente a su canasta regional, fuerza relativa a 6 meses y si subió o bajó en el año, con un castigo si está más nerviosa de lo normal). Umbrales: Comprar ≥ 0,45 · Comprar de a poco ≥ 0,20 · Esperar · Vender una parte ≤ −0,20 · Vender ≤ −0,45. Los 5 modelos fijan el rango, el precio objetivo, la compra máxima, el piso de protección y el nivel de riesgo.</p><h4>Opinión de los 5 modelos (versión 1, hoy segunda opinión)</h4><div class="formula">S = Σ wᵢ · cᵢ · sᵢ / Σ wᵢ · pesos: ${Object.entries(WEIGHTS).map(([k, w]) => `${MODEL_NAMES[k]} ${Math.round(w * 100)} %`).join(", ")}</div>
+    <p class="explain"><b>La tendencia decide si comprar, esperar o vender. Los 9 modelos ponen el rango, el límite de pérdida, la zona de ganancia y el nivel de riesgo.</b></p><details class="how"><summary>Ver fórmulas, umbrales y datos</summary><h4>Versión actual: la tendencia</h4><p class="explain">Desde el backtest, la dirección del veredicto la decide la <b>tendencia</b> (momentum de 12 meses frente a su canasta regional, fuerza relativa a 6 meses y si subió o bajó en el año, con un castigo si está más nerviosa de lo normal). Umbrales: Comprar ≥ 0,45 · Comprar de a poco ≥ 0,20 · Esperar · Vender una parte ≤ −0,20 · Vender ≤ −0,45. Los modelos fijan el rango, el precio objetivo, la compra máxima, el piso de protección y el nivel de riesgo.</p><h4>Opinión combinada de los modelos (versión 1, hoy segunda opinión): Merton, reversión, opciones reales, Vasicek y manada</h4><div class="formula">S = Σ wᵢ · cᵢ · sᵢ / Σ wᵢ · pesos: ${Object.entries(WEIGHTS).map(([k, w]) => `${MODEL_NAMES[k]} ${Math.round(w * 100)} %`).join(", ")}</div>
     <p class="explain">Cada señal sᵢ se multiplica por la confianza cᵢ del modelo, de modo que un modelo poco fiable pesa menos. La suma se lleva a la escala −1 a +1 y se traduce así: <b>Comprar</b> (≥ 0,30), <b>Comprar de a poco</b> (0,12 a 0,30), <b>Esperar</b> (−0,12 a 0,12), <b>Vender una parte</b> (−0,30 a −0,12) y <b>Vender</b> (≤ −0,30). Si el riesgo de caída brusca es alto, una compra se rebaja a "Comprar con cautela". El precio objetivo mezcla el centro de Merton con el equilibrio de la reversión (según su fiabilidad).</p>
     <h4>Datos</h4><p class="explain">Precios diarios ajustados de Yahoo Finance (3 años) para cualquier símbolo del mundo, y bonos del Tesoro de EE. UU. (^IRX, ^FVX, ^TNX, ^TYX). Si Yahoo no responde, la aplicación usa datos reales guardados de unos 100 activos y lo indica arriba a la derecha.</p></details></div>
   <div id="bt"></div>
@@ -1175,7 +1177,7 @@ function backtestCard(t) {
     <p class="explain"><b>Se recalculó lo que Horizon habría dicho cada mes entre ${t.oos.from.slice(0, 4)} y ${t.oos.to.slice(0, 4)} en ${t.nAssets} activos, usando solo la información disponible en cada fecha, y se miró qué pasó 3 meses después (${t.oos.n.toLocaleString("es-CO")} casos).</b></p>
     <details class="how"><summary>Ver los resultados</summary>
       <h4>Versión actual: la tendencia decide</h4><div class="rank bt">${head}${t.byVerdict.map(row).join("")}</div>
-      <h4>Versión anterior: los 5 modelos decidían</h4><div class="rank bt">${head}${(t.byVerdict5 || []).map(row).join("")}</div>
+      <h4>Versión anterior: la combinación de modelos decidía</h4><div class="rank bt">${head}${(t.byVerdict5 || []).map(row).join("")}</div>
       <p class="explain">Con la versión anterior, «Comprar» rendía menos que «Vender»: la señal iba al revés. Con la tendencia el orden es el correcto (los «Comprar» suben más seguido que los «Vender»), pero la ventaja frente al mercado es pequeña (${pct(s.v2Buy?.excess ?? 0, 1)} cada 3 meses) y no es estadísticamente segura (correlación de rangos ${(t.ic?.trend?.ic ?? 0).toFixed(3).replace(".", ",")}, t ≈ ${(t.ic?.trend?.t ?? 0).toFixed(1).replace(".", ",")}).</p>
       <h4>Lo que sí funciona bien: medir el riesgo</h4>
       <p class="explain">El rango «si va mal / si va bien» debía contener el precio final 80 de cada 100 veces y lo hizo <b>${Math.round((t.coverage?.inside ?? 0) * 100)}</b>. Por eso el plan usa los modelos para el límite de pérdida, la zona de ganancia y el tamaño de la compra.</p>
