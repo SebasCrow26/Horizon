@@ -1,6 +1,7 @@
 // Horizon — controlador de la interfaz
 import { getSeries, getRates, getUniverse, search, regionOf, REGION_NAMES, loadSnapshot, getIdeas, getSparks, getMovers, getFxToCOP, getTrackRecord } from "./data.js";
 import { factorNotes } from "./models/factors.js";
+import { journalEntries, journalRecord, journalEvaluate, journalSummary, journalReplace, journalClear, HORIZONS } from "./journal.js";
 import { analyzeAll, MODEL_NAMES, WEIGHTS } from "./models/ensemble.js";
 import * as C from "./charts.js";
 import { fmtPrice, pct, pctPlain } from "./charts.js";
@@ -24,11 +25,18 @@ const QUICK = [["AAPL", "Apple"], ["NVDA", "Nvidia"], ["ECOPETROL.CL", "Ecopetro
 const state = { watch: store.get("watch", DEFAULT_WATCH), horizon: store.get("horizon", 63), mode: store.get("mode", "simple"), amount: store.get("amount", 1000000), theme: store.get("theme", matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark") };
 // Perfil (tolerancia al riesgo y costos de operar) y portafolio: se guardan solo en este dispositivo
 state.profile = { risk: "media", commission: 0.5, fxSpread: 1, notify: false, ...store.get("profile", {}) };
-state.portfolio = store.get("portfolio", []);
+state.pfMode = store.get("pfmode", "practice"); // "practice" = simulado (por defecto) · "real"
+const PF_KEY = () => (state.pfMode === "practice" ? "portfolio_practice" : "portfolio");
+const CLOSED_KEY = () => (state.pfMode === "practice" ? "closed_practice" : "closed");
+const PRACTICE_START = 10000000;
+state.portfolio = store.get(PF_KEY(), []);
 let track = null; // resultados del backtest (data/backtest_report.json)
 getTrackRecord().then((t) => { track = t; });
 const saveProfile = () => store.set("profile", state.profile);
-const savePortfolio = () => store.set("portfolio", state.portfolio);
+const savePortfolio = () => store.set(PF_KEY(), state.portfolio);
+const practiceCash = () => store.get("practice_cash", store.get("practice_start", PRACTICE_START));
+const setPracticeCash = (x) => store.set("practice_cash", Math.round(x));
+function setPfMode(m) { state.pfMode = m; store.set("pfmode", m); state.portfolio = store.get(PF_KEY(), []); }
 
 // ---------- tema ----------
 function applyTheme() {
@@ -95,6 +103,7 @@ function analyze(sym) {
     const a = await runAnalysis({ series, rates, universe, region, horizonDays: state.horizon });
     a.series = series; a.region = region;
     setStatus(series);
+    try { journalRecord(a); } catch (e) { /* el diario nunca debe romper el análisis */ }
     return a;
   })();
   cache.set(key, p);
@@ -263,6 +272,8 @@ async function renderBrief() {
   const buys = done.filter((a) => a.verdict.key === "buy").map((a) => a.symbol);
   if (buys.length) lines.push({ cls: "", ico: "trophy", html: `Con tendencia fuerte hoy: <b>${buys.slice(0, 4).map(esc).join(", ")}</b>`, href: "#/ranking" });
   if (!lines.length) lines.push({ cls: "", ico: "info", html: "Sin cambios importantes en tu lista desde tu última visita." });
+  const jn = journalEntries().length;
+  if (jn) lines.push({ cls: "", ico: "chart", html: `Diario: ${jn} veredicto${jn === 1 ? "" : "s"} anotado${jn === 1 ? "" : "s"} para revisar si Horizon acierta`, href: "#/diario" });
   notifyAlerts(alerts);
   box.innerHTML = `<h2 class="sec">Hoy en tu lista <small>${new Date().toLocaleDateString("es-CO", { weekday: "long", day: "numeric", month: "long" })}</small></h2>
     <div class="brief glass rise">${lines.slice(0, 5).map((l) => `<${l.href ? `a href="${l.href}"` : "div"} class="br-l ${l.cls}">${ico(l.ico)}<span>${l.html}</span></${l.href ? "a" : "div"}>`).join("")}</div>`;
@@ -760,16 +771,20 @@ async function holdingValues() {
     const price = q?.price ?? h.cost;
     const f = fx[h.cur || ""];
     const value = h.qty * price, cost = h.qty * h.cost;
-    return { ...h, idx, price, prev: q?.prev, value, costTot: cost, pl: value - cost, plPct: cost ? value / cost - 1 : 0, fx: f, valueCOP: f != null ? value * f : null, plCOP: f != null ? (value - cost) * f : null, live: q?.source === "live" };
+    const valueCOP = f != null ? value * f : null;
+    const basis = h.basisCOP ?? (f != null ? cost * f : null);
+    const plCOP = valueCOP != null && basis != null ? valueCOP - basis : null;
+    return { ...h, idx, price, prev: q?.prev, value, costTot: cost, pl: plCOP ?? value - cost, plPct: basis ? (valueCOP ?? 0) / basis - 1 : cost ? value / cost - 1 : 0, fx: f, valueCOP, plCOP, basisCOP: basis, live: q?.source === "live" };
   });
 }
 async function portfolioAlerts() {
   if (!state.portfolio.length) return [];
   const vals = await holdingValues().catch(() => []);
   const out = [];
+  const tagP = state.pfMode === "practice" ? " (práctica)" : "";
   for (const h of vals) {
-    if (h.stop && h.price <= h.stop) out.push({ key: `${h.sym}|stop`, level: "neg", html: `<b>${esc(h.sym)}</b> tocó tu límite de pérdida (${fmtPrice(h.stop)}): considera vender`, text: `${h.sym} tocó tu límite de pérdida (${fmtPrice(h.stop)})` });
-    else if (h.target && h.price >= h.target) out.push({ key: `${h.sym}|target`, level: "pos", html: `<b>${esc(h.sym)}</b> llegó a tu zona de ganancia (${fmtPrice(h.target)}): considera vender una parte`, text: `${h.sym} llegó a tu zona de ganancia (${fmtPrice(h.target)})` });
+    if (h.stop && h.price <= h.stop) out.push({ key: `${h.sym}|stop`, level: "neg", html: `<b>${esc(h.sym)}</b> tocó tu límite de pérdida (${fmtPrice(h.stop)}): considera vender${tagP}`, text: `${h.sym} tocó tu límite de pérdida (${fmtPrice(h.stop)})${tagP}` });
+    else if (h.target && h.price >= h.target) out.push({ key: `${h.sym}|target`, level: "pos", html: `<b>${esc(h.sym)}</b> llegó a tu zona de ganancia (${fmtPrice(h.target)}): considera vender una parte${tagP}`, text: `${h.sym} llegó a tu zona de ganancia (${fmtPrice(h.target)})${tagP}` });
     const p = cache.get(h.sym + "|" + state.horizon);
     if (p) { try { const a = await p; if (a.verdict.key === "sell" || a.verdict.key === "reduce") out.push({ key: `${h.sym}|v|${a.verdict.key}`, level: "", html: `Horizon ahora dice <b class="${a.verdict.tone}">${esc(a.verdict.label)}</b> para <b>${esc(h.sym)}</b>, que tienes en tu portafolio`, text: `Horizon ahora dice ${a.verdict.label} para ${h.sym}` }); } catch (e) { /* sin datos */ } }
   }
@@ -795,17 +810,21 @@ async function renderPortafolio(query) {
   currentRoute = "portafolio"; updateNav("portafolio");
   const addSym = (query.get("add") || "").toUpperCase();
   const my = routeToken;
-  view.innerHTML = `<section class="hero rise"><div class="eyebrow">Tus inversiones</div><h1 class="title">Mi <em>portafolio</em></h1><p class="lead">Lo que tienes, cuánto vas ganando y cuándo conviene actuar. Se guarda solo en este dispositivo.</p></section>
-    <div id="pf-sum"></div><div id="pf-alerts"></div><div id="pf-list"></div>
+  const P = state.pfMode === "practice";
+  const closed = store.get(CLOSED_KEY(), []);
+  view.innerHTML = `<section class="hero rise"><div class="eyebrow">${P ? "Simulado · no se compra nada" : "Tus inversiones"}</div><h1 class="title">${P ? "Portafolio de <em>práctica</em>" : "Mi <em>portafolio</em>"}</h1>
+      <p class="lead">${P ? `Compra y vende con ${cop(store.get("practice_start", PRACTICE_START))} ficticios para ver cómo te iría, con costos y avisos reales. Nada sale de este dispositivo.` : "Lo que de verdad tienes, cuánto vas ganando y cuándo conviene actuar. Se guarda solo en este dispositivo."}</p>
+      <div class="seg pf-mode" id="pf-mode" role="group" aria-label="Tipo de portafolio"><i class="ind"></i><a href="javascript:void(0)" data-v="practice" class="${P ? "on" : ""}">Práctica</a><a href="javascript:void(0)" data-v="real" class="${P ? "" : "on"}">Real</a></div></section>
+    <div id="pf-sum"></div><div id="pf-alerts"></div><div id="pf-list"></div><div id="pf-closed"></div>
     <section class="glass card rise pf-form" id="pf-add">
-      <details class="how" ${addSym || !state.portfolio.length ? "open" : ""}><summary>Agregar una compra</summary>
+      <details class="how" ${addSym || !state.portfolio.length ? "open" : ""}><summary>${P ? "Hacer una compra simulada" : "Registrar una compra"}</summary>
         <form id="pf-f" autocomplete="off">
           <label><span>Símbolo</span><input name="sym" required maxlength="20" placeholder="AAPL, ECOPETROL.CL…" value="${esc(addSym)}" autocapitalize="characters" spellcheck="false" list="pf-sg"><datalist id="pf-sg"></datalist></label>
           <label><span>Cantidad</span><input name="qty" required inputmode="decimal" placeholder="10"></label>
           <label><span>Precio de compra</span><input name="cost" required inputmode="decimal" placeholder="Se llena solo"></label>
           <label><span>Fecha</span><input name="date" type="date" value="${new Date().toISOString().slice(0, 10)}"></label>
-          <p class="pf-hint muted" id="pf-hint">Al guardar, Horizon fija tu límite de pérdida y tu zona de ganancia con los modelos. Puedes cambiarlos después.</p>
-          <button class="btn" type="submit">Guardar</button>
+          <p class="pf-hint muted" id="pf-hint">${P ? "Se descuenta del efectivo de práctica con la comisión y el costo de cambio de tu perfil. " : ""}Horizon fija tu límite de pérdida y tu zona de ganancia con los modelos.</p>
+          <button class="btn" type="submit">${P ? "Comprar (simulado)" : "Guardar"}</button>
         </form></details></section>
     <section class="glass card rise pf-prof"><h3>Tu perfil</h3>
       <div class="pf-row"><span>Tolerancia al riesgo</span><div class="seg" id="pf-risk"><i class="ind"></i>${["baja", "media", "alta"].map((r) => `<a href="javascript:void(0)" data-v="${r}" class="${state.profile.risk === r ? "on" : ""}">${r[0].toUpperCase() + r.slice(1)}</a>`).join("")}</div></div>
@@ -813,12 +832,15 @@ async function renderPortafolio(query) {
       <div class="pf-row"><label for="pf-com">Comisión por operación</label><span class="pf-num"><input id="pf-com" inputmode="decimal" value="${String(state.profile.commission).replace(".", ",")}"> %</span></div>
       <div class="pf-row"><label for="pf-fx">Costo de cambiar pesos a otra moneda</label><span class="pf-num"><input id="pf-fx" inputmode="decimal" value="${String(state.profile.fxSpread).replace(".", ",")}"> %</span></div>
       <div class="pf-row"><span>Avisos en este dispositivo</span><button class="chip" id="pf-notify">${state.profile.notify && typeof Notification !== "undefined" && Notification.permission === "granted" ? "✓ Activados" : "Activar"}</button></div>
-      <p class="pf-hint muted">El perfil cambia el tamaño sugerido de cada compra (baja 5 %, media 10 %, alta 15 % de lo que tienes para invertir). Los costos se descuentan de los escenarios. Los avisos funcionan mientras Horizon está abierto; para avisos con la app cerrada haría falta un servidor.</p>
-    </section>${disclaimer()}`;
-  moveInd($("#pf-risk"), "pfr"); moveInd($("#pf-hz"), "pfh");
+      ${P ? `<div class="pf-row"><span>Empezar la práctica de nuevo</span><button class="chip" id="pf-reset">Reiniciar</button></div>` : ""}
+      <p class="pf-hint muted">El perfil cambia el tamaño sugerido de cada compra (baja 5 %, media 10 %, alta 15 % de lo que tienes para invertir). Los costos se descuentan de los escenarios. Los avisos funcionan mientras Horizon está abierto.</p>
+    </section>
+    <a class="glass card rise pf-diary interactive" href="#/diario">${ico("chart")}<span><b>Diario de Horizon</b><span class="muted">Revisa si los veredictos acertaron, sin comprar nada</span></span></a>
+    ${disclaimer()}`;
+  moveInd($("#pf-mode"), "pfm"); moveInd($("#pf-risk"), "pfr"); moveInd($("#pf-hz"), "pfh");
+  $("#pf-mode").addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (!b || b.dataset.v === state.pfMode) return; setPfMode(b.dataset.v); renderPortafolio(new URLSearchParams()); });
   $("#pf-risk").addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (!b) return; state.profile.risk = b.dataset.v; saveProfile(); $$("#pf-risk a").forEach((x) => x.classList.toggle("on", x === b)); moveInd($("#pf-risk"), "pfr"); toast("Perfil de riesgo: " + b.dataset.v); });
   $("#pf-hz").addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (!b) return; state.horizon = +b.dataset.v; store.set("horizon", state.horizon); $$("#pf-hz a").forEach((x) => x.classList.toggle("on", x === b)); moveInd($("#pf-hz"), "pfh"); });
-  const num = (v) => { const n = parseFloat(String(v).replace(/\./g, "").replace(",", ".")); return isFinite(n) ? n : NaN; };
   const dec = (v) => { const n = parseFloat(String(v).replace(",", ".")); return isFinite(n) ? n : NaN; };
   $("#pf-com").addEventListener("change", (e) => { const n = dec(e.target.value); if (n >= 0 && n < 10) { state.profile.commission = n; saveProfile(); } });
   $("#pf-fx").addEventListener("change", (e) => { const n = dec(e.target.value); if (n >= 0 && n < 10) { state.profile.fxSpread = n; saveProfile(); } });
@@ -829,6 +851,13 @@ async function renderPortafolio(query) {
     e.target.textContent = state.profile.notify ? "✓ Activados" : "Activar";
     toast(state.profile.notify ? "Avisos activados" : "El navegador no dio permiso para avisos");
   });
+  $("#pf-reset")?.addEventListener("click", () => {
+    const was = { pf: state.portfolio.slice(), closed: store.get(CLOSED_KEY(), []), cash: practiceCash() };
+    state.portfolio = []; savePortfolio(); store.set(CLOSED_KEY(), []); setPracticeCash(store.get("practice_start", PRACTICE_START));
+    renderPortafolio(new URLSearchParams());
+    toast("Práctica reiniciada", { label: "Deshacer", fn: () => { state.portfolio = was.pf; savePortfolio(); store.set(CLOSED_KEY(), was.closed); setPracticeCash(was.cash); if (currentRoute === "portafolio") renderPortafolio(new URLSearchParams()); } });
+  });
+  const feeRate = (cur) => ((+state.profile.commission || 0) + (cur && cur !== "COP" ? (+state.profile.fxSpread || 0) : 0)) / 100;
   // formulario: al escribir el símbolo se sugiere y se llena el precio actual
   const f = $("#pf-f");
   let sgT = 0;
@@ -846,45 +875,83 @@ async function renderPortafolio(query) {
     const btn = $("button[type=submit]", f); btn.disabled = true; btn.textContent = "Analizando…";
     let a = null;
     try { a = await analyze(sym); } catch (err) { /* se guarda sin niveles */ }
-    const h = { sym, qty, cost, date: f.date.value, cur: a?.currency || "", name: a?.name || sym, stop: a ? +a.stop.toPrecision(6) : null, target: a ? +(a.target > a.S0 * 1.01 ? a.target : a.range.hi).toPrecision(6) : null }; // niveles de hoy según los modelos
+    const cur = a?.currency || "";
+    const fx = await getFxToCOP(cur);
+    const basisCOP = fx != null ? qty * cost * fx * (1 + feeRate(cur)) : null;
+    if (P) {
+      if (basisCOP == null) { toast("No se pudo obtener el tipo de cambio: intenta de nuevo"); btn.disabled = false; btn.textContent = "Comprar (simulado)"; return; }
+      if (basisCOP > practiceCash() + 1) { toast(`No alcanza: tienes ${cop(practiceCash())} y esta compra cuesta ${cop(basisCOP)}`); btn.disabled = false; btn.textContent = "Comprar (simulado)"; return; }
+    }
+    const h = { sym, qty, cost, date: f.date.value, cur, name: a?.name || sym, basisCOP: basisCOP != null ? Math.round(basisCOP) : null, stop: a ? +a.stop.toPrecision(6) : null, target: a ? +(a.target > a.S0 * 1.01 ? a.target : a.range.hi).toPrecision(6) : null, verdictAtBuy: a?.verdict.key || null };
+    const cashBefore = practiceCash();
     state.portfolio.push(h); savePortfolio();
-    toast(`${sym} agregada a tu portafolio`, { label: "Deshacer", fn: () => { state.portfolio = state.portfolio.filter((x) => x !== h); savePortfolio(); if (currentRoute === "portafolio") renderPortafolio(new URLSearchParams()); } });
+    if (P) setPracticeCash(cashBefore - basisCOP);
+    toast(P ? `Compra simulada de ${sym}` : `${sym} agregada a tu portafolio`, { label: "Deshacer", fn: () => { state.portfolio = state.portfolio.filter((x) => x !== h); savePortfolio(); if (P) setPracticeCash(cashBefore); if (currentRoute === "portafolio") renderPortafolio(new URLSearchParams()); } });
     location.hash = "#/portafolio";
     if (currentRoute === "portafolio") renderPortafolio(new URLSearchParams());
   });
-  if (!state.portfolio.length) { $("#pf-sum").innerHTML = `<div class="glass card rise"><p><b>Aún no tienes compras registradas.</b></p><p class="muted" style="margin-top:4px">Agrega lo que ya tienes (o lo que piensas comprar) para seguir tu ganancia, ver si estás muy concentrado y recibir avisos.</p></div>`; return; }
+  const cash = P ? practiceCash() : 0;
+  const realized = closed.reduce((a, c) => a + (c.plCOP || 0), 0);
+  const closedHTML = closed.length ? `<h2 class="sec">Ventas <small>ganancia realizada ${cop(realized)}</small></h2><div class="wl">${closed.slice(-10).reverse().map((c) => `
+      <div class="wl-r pf-r" data-href="#/t/${encodeURIComponent(c.sym)}"><div class="wl-id"><b>${esc(c.sym)}</b><span class="nm">${esc(String(c.qty).replace(".", ","))} · compra ${fmtPrice(c.cost)} → venta ${fmtPrice(c.price)} ${esc(c.cur || "")}</span><span class="wl-v faint">${esc(c.buyDate || "")} → ${esc(c.sellDate || "")}</span></div>
+      <div class="wl-px"><b class="${c.plCOP >= 0 ? "pos" : "neg"}">${cop(c.plCOP)}</b><span class="pill ${c.plPct >= 0 ? "pos" : "neg"}">${pct(c.plPct, 1)}</span></div></div>`).join("")}</div>` : "";
+  $("#pf-closed").innerHTML = closedHTML;
+  if (!state.portfolio.length) {
+    $("#pf-sum").innerHTML = P
+      ? `<section class="glass card rise pf-sum"><div class="pf-tot"><span class="muted">Efectivo de práctica</span><b>${cop(cash)}</b>${closed.length ? `<span class="${realized >= 0 ? "pos" : "neg"}">${cop(realized)} ganados en ventas</span>` : ""}</div><p class="pf-hint muted">Busca un activo y pulsa «+ Portafolio», o usa el formulario de abajo. Prueba seguir el plan que sugiere Horizon y mira cómo te va.</p></section>`
+      : `<div class="glass card rise"><p><b>Aún no tienes compras registradas.</b></p><p class="muted" style="margin-top:4px">Aquí van solo las inversiones que de verdad tengas. Para probar sin dinero, usa «Práctica».</p></div>`;
+    return;
+  }
   const vals = await holdingValues();
   if (my !== routeToken) return;
   const okCOP = vals.every((v) => v.valueCOP != null);
   const tot = vals.reduce((s, v) => s + (v.valueCOP ?? 0), 0), totPL = vals.reduce((s, v) => s + (v.plCOP ?? 0), 0);
   const totCost = tot - totPL;
-  const day = vals.reduce((s, v) => s + (v.prev && v.valueCOP != null ? (v.price - v.prev) * v.qty * v.fx : 0), 0);
-  // concentración: por activo, por región y en cripto
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const day = vals.reduce((s, v) => s + (v.prev && v.valueCOP != null && v.date !== todayISO ? (v.price - v.prev) * v.qty * v.fx : 0), 0); // lo comprado hoy no cuenta en el cambio del día
+  // concentración: por activo, por región y en cripto (sobre lo invertido, sin contar el efectivo)
   const w = vals.map((v) => ({ sym: v.sym, w: tot ? (v.valueCOP ?? 0) / tot : 0, region: regionOf(v.sym) })).sort((x, y) => y.w - x.w);
   const byReg = {}; for (const x of w) byReg[x.region] = (byReg[x.region] || 0) + x.w;
   const warns = [];
-  if (w[0] && w[0].w > 0.3 && w.length > 1) warns.push(`${w[0].sym} pesa ${Math.round(w[0].w * 100)} % de tu portafolio: si le va mal, te afecta mucho.`);
-  if (w.length === 1) warns.push("Todo tu dinero está en un solo activo. Repartirlo en varios baja el riesgo.");
-  for (const [r, x] of Object.entries(byReg)) if (x > 0.7 && Object.keys(byReg).length >= 1 && w.length > 2) warns.push(`${Math.round(x * 100)} % está en ${REGION_NAMES[r]}. Mirar otras regiones diversifica.`);
+  if (w[0] && w[0].w > 0.3 && w.length > 1) warns.push(`${w[0].sym} pesa ${Math.round(w[0].w * 100)} % de lo invertido: si le va mal, te afecta mucho.`);
+  if (w.length === 1) warns.push("Todo lo invertido está en un solo activo. Repartirlo en varios baja el riesgo.");
+  for (const [r, x] of Object.entries(byReg)) if (x > 0.7 && w.length > 2) warns.push(`${Math.round(x * 100)} % está en ${REGION_NAMES[r]}. Mirar otras regiones diversifica.`);
   if ((byReg.CRYPTO || 0) > 0.15) warns.push(`Las criptomonedas son ${Math.round(byReg.CRYPTO * 100)} % del total: suelen caer más de 50 % en malos años.`);
+  const start = store.get("practice_start", PRACTICE_START), equity = tot + cash;
   $("#pf-sum").innerHTML = `<section class="glass card rise pf-sum">
-      <div class="pf-tot"><span class="muted">Valor total</span><b>${okCOP ? cop(tot) : "—"}</b><span class="${totPL >= 0 ? "pos" : "neg"}">${cop(totPL)} (${pct(totCost ? totPL / totCost : 0, 1)}) desde la compra</span>${day ? `<span class="${day >= 0 ? "pos" : "neg"} muted-s">${cop(day)} hoy</span>` : ""}</div>
-      <div class="alloc" role="img" aria-label="Reparto del portafolio">${w.map((x, i) => `<i style="width:${(x.w * 100).toFixed(2)}%;background:${COLORS[i % COLORS.length]}" title="${esc(x.sym)} ${Math.round(x.w * 100)} %"></i>`).join("")}</div>
+      ${P ? `<div class="pf-tot"><span class="muted">Total de la práctica (efectivo + inversiones)</span><b>${okCOP ? cop(equity) : "—"}</b><span class="${equity - start >= 0 ? "pos" : "neg"}">${cop(equity - start)} (${pct(equity / start - 1, 1)}) desde que empezaste</span>${day ? `<span class="${day >= 0 ? "pos" : "neg"} muted-s">${cop(day)} hoy</span>` : ""}</div>
+        <div class="pf-split"><span><span class="muted">Invertido</span><b>${okCOP ? cop(tot) : "—"}</b></span><span><span class="muted">Efectivo</span><b>${cop(cash)}</b></span><span><span class="muted">Abiertas</span><b class="${totPL >= 0 ? "pos" : "neg"}">${cop(totPL)}</b></span></div>`
+      : `<div class="pf-tot"><span class="muted">Valor total</span><b>${okCOP ? cop(tot) : "—"}</b><span class="${totPL >= 0 ? "pos" : "neg"}">${cop(totPL)} (${pct(totCost ? totPL / totCost : 0, 1)}) desde la compra</span>${day ? `<span class="${day >= 0 ? "pos" : "neg"} muted-s">${cop(day)} hoy</span>` : ""}</div>`}
+      <div class="alloc" role="img" aria-label="Reparto de lo invertido">${w.map((x, i) => `<i style="width:${(x.w * 100).toFixed(2)}%;background:${COLORS[i % COLORS.length]}" title="${esc(x.sym)} ${Math.round(x.w * 100)} %"></i>`).join("")}</div>
       <div class="alloc-l">${w.map((x, i) => `<span><i style="background:${COLORS[i % COLORS.length]}"></i>${esc(x.sym)} ${Math.round(x.w * 100)} %</span>`).join("")}</div>
       ${warns.length ? `<div class="flags">${warns.map((t) => `<div class="flag">${ico("shield")}<span>${esc(t)}</span></div>`).join("")}</div>` : ""}
       ${okCOP ? "" : `<p class="pf-hint muted">No se pudo obtener el tipo de cambio de alguna moneda; esos activos no suman en pesos.</p>`}
-      <p class="pf-hint muted">En pesos colombianos al cambio de hoy${vals.some((v) => !v.live) ? " · algunos precios son de datos guardados" : ""}.</p></section>`;
+      <p class="pf-hint muted">En pesos colombianos al cambio de hoy, con comisiones${vals.some((v) => !v.live) ? " · algunos precios son de datos guardados" : ""}.</p></section>`;
   $("#pf-list").innerHTML = `<h2 class="sec">Posiciones</h2><div class="wl">${vals.map((v) => `
     <div class="wl-r pf-r" data-href="#/t/${encodeURIComponent(v.sym)}">
       <div class="wl-id"><b>${esc(v.sym)}</b><span class="nm">${esc(v.qty.toLocaleString("es-CO"))} × ${fmtPrice(v.cost)} ${esc(v.cur || "")}</span><span class="wl-v" data-pfv="${esc(v.sym)}"><span class="faint">Límite ${v.stop ? fmtPrice(v.stop) : "—"} · Ganancia ${v.target ? fmtPrice(v.target) : "—"}</span></span></div>
-      <div class="wl-px"><b>${v.valueCOP != null ? cop(v.valueCOP) : fmtPrice(v.value) + " " + esc(v.cur)}</b><span class="pill ${v.pl >= 0 ? "pos" : "neg"}">${pct(v.plPct, 1)}</span></div>
-      <button class="rm" data-pfrm="${v.idx}" aria-label="Quitar ${esc(v.sym)} del portafolio">×</button></div>`).join("")}</div>`;
+      <div class="wl-px"><b>${v.valueCOP != null ? cop(v.valueCOP) : fmtPrice(v.value) + " " + esc(v.cur)}</b><span class="pill ${v.pl >= 0 ? "pos" : "neg"}">${pct(v.plPct, 1)}</span><button class="chip pf-sell" data-pfsell="${v.idx}">${P ? "Vender" : "Registrar venta"}</button></div>
+      <button class="rm" data-pfrm="${v.idx}" aria-label="Borrar ${esc(v.sym)} sin registrar venta">×</button></div>`).join("")}</div>`;
   $("#pf-list").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-pfrm]"); if (!b) return;
-    e.stopPropagation();
-    const was = state.portfolio.slice(), i = +b.dataset.pfrm, sy = state.portfolio[i]?.sym;
-    state.portfolio.splice(i, 1); savePortfolio(); renderPortafolio(new URLSearchParams());
-    toast(`${sy} quitada del portafolio`, { label: "Deshacer", fn: () => { state.portfolio = was; savePortfolio(); if (currentRoute === "portafolio") renderPortafolio(new URLSearchParams()); } });
+    const sell = e.target.closest("[data-pfsell]"), rm = e.target.closest("[data-pfrm]");
+    if (!sell && !rm) return;
+    e.stopPropagation(); e.preventDefault();
+    const i = +(sell || rm).dataset[sell ? "pfsell" : "pfrm"], h = state.portfolio[i];
+    if (!h) return;
+    const was = { pf: state.portfolio.slice(), closed: store.get(CLOSED_KEY(), []), cash: practiceCash() };
+    const undo = () => { state.portfolio = was.pf; savePortfolio(); store.set(CLOSED_KEY(), was.closed); if (P) setPracticeCash(was.cash); if (currentRoute === "portafolio") renderPortafolio(new URLSearchParams()); };
+    if (rm) { state.portfolio.splice(i, 1); savePortfolio(); renderPortafolio(new URLSearchParams()); toast(`${h.sym} borrada (sin venta)`, { label: "Deshacer", fn: undo }); return; }
+    // vender al precio actual: el dinero vuelve al efectivo (práctica) y la ganancia queda registrada
+    const v = vals.find((x) => x.idx === i);
+    if (!v || v.fx == null) { toast("No se pudo obtener el precio o el cambio: intenta de nuevo"); return; }
+    const proceeds = v.qty * v.price * v.fx * (1 - feeRate(v.cur));
+    const basis = v.basisCOP ?? v.qty * v.cost * v.fx;
+    const c = { sym: h.sym, qty: h.qty, cost: h.cost, price: +v.price.toPrecision(6), cur: h.cur, buyDate: h.date, sellDate: new Date().toISOString().slice(0, 10), plCOP: Math.round(proceeds - basis), plPct: proceeds / basis - 1 };
+    state.portfolio.splice(i, 1); savePortfolio();
+    store.set(CLOSED_KEY(), [...was.closed, c]);
+    if (P) setPracticeCash(was.cash + proceeds);
+    renderPortafolio(new URLSearchParams());
+    toast(`${P ? "Venta simulada" : "Venta registrada"}: ${h.sym} ${c.plCOP >= 0 ? "+" : "−"}${cop(Math.abs(c.plCOP)).replace("−", "")}`, { label: "Deshacer", fn: undo });
   }, { capture: true });
   // veredicto actual de cada posición y avisos
   mapLimit([...new Set(vals.map((v) => v.sym))], 3, async (sym) => {
@@ -894,6 +961,74 @@ async function renderPortafolio(query) {
     const al = await portfolioAlerts();
     notifyAlerts(al);
     if (al.length) $("#pf-alerts").innerHTML = `<div class="brief glass rise">${al.map((l) => `<div class="br-l ${l.level}">${ico(l.level === "neg" ? "shield" : "bell")}<span>${l.html}</span></div>`).join("")}</div>`;
+  });
+}
+
+// ----- Diario de Horizon: lo que dijo y qué pasó después -----
+const dayStr = (d, opt = { day: "numeric", month: "short", year: "numeric" }) => new Date(d * 86400000).toLocaleDateString("es-CO", { timeZone: "UTC", ...opt });
+async function renderDiario() {
+  currentRoute = "diario"; updateNav("portafolio");
+  const my = routeToken;
+  view.innerHTML = `<a class="back" href="#/portafolio">${ico("back")}Portafolio</a>
+    <section class="hero rise" style="padding-top:.5rem"><div class="eyebrow">La prueba en vivo</div><h1 class="title">Diario de <em>Horizon</em></h1>
+      <p class="lead">Cada vez que abres un activo, Horizon anota lo que dijo. Al pasar 1 y 3 meses revisa qué pasó de verdad. Tú no compras nada: solo ves si la app acierta.</p></section>
+    <div id="jr"><div class="skeleton" style="height:120px;border-radius:18px"></div></div>${disclaimer()}`;
+  let updated = 0;
+  try { updated = await journalEvaluate(); } catch (e) { /* sin conexión: se muestra lo que hay */ }
+  if (my !== routeToken) return;
+  const list = journalEntries();
+  const rt = (e) => 2 * ((+state.profile.commission || 0) + (e.cur && e.cur !== "COP" ? (+state.profile.fxSpread || 0) : 0)) / 100;
+  const sm = journalSummary(list, rt);
+  const tableFor = (h) => {
+    const rows = sm.rows[h].filter((r) => r.n);
+    if (!rows.length) return `<p class="muted jr-empty">Todavía no hay resultados a ${h === 21 ? "1 mes" : "3 meses"}.${sm.total ? ` Los primeros llegan alrededor del ${dayStr((sm.since ?? 0) + Math.ceil(h * 1.4), { day: "numeric", month: "long" })}.` : ""}</p>`;
+    return `<div class="rank bt"><div class="r h bt-r"><span>Veredicto</span><span class="num">Casos</span><span class="num">Subió</span><span class="num">Rend. medio</span><span class="num hide-m">Vs. S&P 500</span></div>${rows.map((r) => `<div class="r bt-r"><span class="${{ buy: "pos2", accumulate: "pos1", hold: "neu", reduce: "neg1", sell: "neg2" }[r.key]}">${esc(r.label)}</span><span class="num">${r.n}</span><span class="num">${Math.round(r.hit * 100)} de 100</span><span class="num ${r.mean >= 0 ? "pos" : "neg"}">${pct(r.mean, 1)}</span><span class="num hide-m ${r.excess == null ? "" : r.excess >= 0 ? "pos" : "neg"}">${r.excess == null ? "—" : pct(r.excess, 1)}</span></div>`).join("")}</div>`;
+  };
+  const recent = list.slice(-25).reverse();
+  const today = Math.floor(Date.now() / 86400000);
+  const status = (e) => {
+    const o3 = e.out?.[63], o1 = e.out?.[21];
+    if (o3) return `<span class="pill ${o3.r >= 0 ? "pos" : "neg"}">${pct(o3.r, 1)}</span><span class="faint jr-s">3 meses${o3.stopHit ? " · tocó el límite" : ""}</span>`;
+    if (o1) return `<span class="pill ${o1.r >= 0 ? "pos" : "neg"}">${pct(o1.r, 1)}</span><span class="faint jr-s">1 mes · falta el de 3</span>`;
+    const left = Math.max(0, e.day + Math.ceil(21 * 1.4) - today);
+    return `<span class="pill">En curso</span><span class="faint jr-s">${left ? `1.er resultado en ${left} días` : "listo pronto"}</span>`;
+  };
+  const pl = sm.plan;
+  $("#jr").innerHTML = `
+    <section class="glass card rise pf-sum">
+      <div class="pf-split"><span><span class="muted">Anotaciones</span><b>${sm.total}</b></span><span><span class="muted">Activos</span><b>${sm.assets}</b></span><span><span class="muted">Desde</span><b>${sm.since != null ? dayStr(sm.since, { day: "numeric", month: "short" }) : "—"}</b></span></div>
+      <p class="pf-hint muted">Una anotación por activo por semana (o antes si cambia el veredicto). Se guarda solo en este dispositivo.${updated ? ` Hoy se completaron ${updated} resultados.` : ""}</p>
+    </section>
+    <h2 class="sec">Marcador a 3 meses</h2>${tableFor(63)}
+    <h2 class="sec">Marcador a 1 mes</h2>${tableFor(21)}
+    <h2 class="sec">Si hubieras seguido los planes</h2>
+    <section class="glass card rise">${pl.n
+      ? `<p class="jr-big ${pl.pl >= 0 ? "pos" : "neg"}">${cop(pl.pl)}</p><p class="muted">Con $1.000.000 en cada «Comprar» o «Comprar de a poco» (${pl.n} casos), saliendo en el límite de pérdida si se tocaba y si no a los 3 meses, ya con costos. Ganaron ${pl.wins} de ${pl.n}. Comprando el S&P 500 en las mismas fechas: <b class="${pl.plBench >= 0 ? "pos" : "neg"}">${cop(pl.plBench)}</b>.</p>`
+      : `<p class="muted">Aparecerá cuando haya compras sugeridas con 3 meses de historia. Mientras tanto puedes practicar en el <a class="lnk" href="#/portafolio">portafolio de práctica</a>.</p>`}</section>
+    <h2 class="sec">Últimas anotaciones</h2>
+    ${recent.length ? `<div class="wl">${recent.map((e) => `<a class="wl-r interactive" href="#/t/${encodeURIComponent(e.sym)}"><div class="wl-id"><b>${esc(e.sym)}</b><span class="nm">${dayStr(e.day)} · ${fmtPrice(e.price)} ${esc(e.cur)}</span><span class="wl-v"><span class="verdict ${e.tone}">${esc(e.label)}</span></span></div><div class="wl-px">${status(e)}</div></a>`).join("")}</div>`
+      : `<div class="glass card"><p class="muted">Aún no hay anotaciones. Abre cualquier activo o tu lista en «Mi lista» y Horizon empezará a anotar.</p></div>`}
+    <div class="jr-tools"><button class="chip" id="jr-exp">Exportar copia</button><label class="chip" for="jr-imp">Importar copia</label><input type="file" id="jr-imp" accept="application/json,.json" hidden><button class="chip" id="jr-del">Borrar diario</button></div>
+    <p class="disc-note">Exporta una copia de vez en cuando: si borras los datos del navegador, el diario se pierde.</p>`;
+  $("#jr-exp").addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify({ app: "Horizon", kind: "diario", exported: new Date().toISOString(), entries: journalEntries(), practice: { portfolio: store.get("portfolio_practice", []), closed: store.get("closed_practice", []), cash: practiceCash() } }, null, 1)], { type: "application/json" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `horizon-diario-${new Date().toISOString().slice(0, 10)}.json`; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+  $("#jr-imp").addEventListener("change", async (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    try {
+      const j = JSON.parse(await file.text());
+      if (!Array.isArray(j.entries)) throw new Error("formato");
+      const was = journalEntries();
+      const byId = new Map([...was, ...j.entries].filter((x) => x && x.id && x.sym).map((x) => [x.id, x]));
+      journalReplace([...byId.values()].sort((a, b) => a.day - b.day));
+      toast(`Diario importado: ${byId.size} anotaciones`, { label: "Deshacer", fn: () => { journalReplace(was); if (currentRoute === "diario") renderDiario(); } });
+      renderDiario();
+    } catch (err) { toast("Ese archivo no es una copia del diario de Horizon"); }
+  });
+  $("#jr-del").addEventListener("click", () => {
+    const was = journalEntries(); journalClear(); renderDiario();
+    toast("Diario borrado", { label: "Deshacer", fn: () => { journalReplace(was); if (currentRoute === "diario") renderDiario(); } });
   });
 }
 
@@ -986,6 +1121,7 @@ function backtestCard(t) {
       <p class="explain">El rango «si va mal / si va bien» debía contener el precio final 80 de cada 100 veces y lo hizo <b>${Math.round((t.coverage?.inside ?? 0) * 100)}</b>. Por eso el plan usa los modelos para el límite de pérdida, la zona de ganancia y el tamaño de la compra.</p>
       <h4>¿Y con inteligencia artificial?</h4>
       <p class="explain">Se entrenó una regresión logística y un random forest con las señales, siempre avanzando en el tiempo. No mejoraron: AUC ${(m.logit_all?.auc ?? 0).toFixed(2).replace(".", ",")} y ${(m.rf?.auc ?? 0).toFixed(2).replace(".", ",")} (0,50 es azar). Con precios de acciones es fácil que un modelo memorice el pasado y falle con datos nuevos, así que no se usan.</p>
+      <h4>La prueba en vivo</h4><p class="explain">El <a class="lnk" href="#/diario">Diario de Horizon</a> anota lo que la app dice desde hoy y mide qué pasa después, para confirmar (o no) estos resultados con datos que el modelo nunca vio.</p>
       <h4>Límites</h4><p class="explain">Solo empresas que existen hoy (sesgo de sobrevivencia); una década mayormente alcista; sin costos en la prueba; 3 meses de horizonte. Que algo haya funcionado no garantiza que siga funcionando.</p>
     </details></div>`;
 }
@@ -1087,6 +1223,7 @@ function route() {
     const [path, qs] = h.split("?");
     if (h.startsWith("/t/")) renderDetail(decodeURIComponent(h.slice(3)));
     else if (path === "/portafolio") renderPortafolio(new URLSearchParams(qs || ""));
+    else if (path === "/diario") renderDiario();
     else if (path.startsWith("/comparar/")) renderComparar(decodeURIComponent(path.slice(10)).split(","));
     else if (h === "/ranking") renderRanking();
     else if (h === "/descubrir") renderDescubrir();

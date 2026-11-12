@@ -1,7 +1,8 @@
 // Gráfico de precio estilo Yahoo Finance, dibujado en SVG propio (sin librerías):
 // rangos 1D · 5D · 1M · 6M · YTD · 1Y · 5Y · Todo, área / línea / velas, volumen, horario extendido,
 // línea punteada del cierre previo (verde por encima, rojo por debajo), etiqueta del último precio,
-// cursor con detalle y actualización automática cada 30 s mientras el mercado está abierto.
+// cursor con detalle, zoom (arrastrar una zona, pellizcar, botones + / −, doble clic para volver) y desplazamiento
+// cuando está acercado, y actualización automática cada 30 s mientras el mercado está abierto.
 import { getChart, CHART_RANGES } from "./data.js";
 import { fmtPriceNum } from "./util.js";
 
@@ -69,7 +70,7 @@ function aggregateTime(d, maxBars) {
 
 export function mountPriceChart(root, { sym, currency = "", onQuote } = {}) {
   const prefs = loadPrefs();
-  const st = { range: RANGE_KEYS.includes(prefs.range) ? prefs.range : "1D", type: prefs.type || "area", vol: prefs.vol !== false, ext: prefs.ext !== false, data: null, error: null, offline: false, loading: true, geom: null };
+  const st = { range: RANGE_KEYS.includes(prefs.range) ? prefs.range : "1D", type: prefs.type || "area", vol: prefs.vol !== false, ext: prefs.ext !== false, data: null, error: null, offline: false, loading: true, geom: null, view: null /* {t0, t1} cuando hay zoom */ };
   const uid = "pxc" + Math.random().toString(36).slice(2, 7);
   let seq = 0, timer = 0, destroyed = false, ro = null;
 
@@ -81,9 +82,11 @@ export function mountPriceChart(root, { sym, currency = "", onQuote } = {}) {
         <span class="pxc-types" role="group" aria-label="Tipo de gráfico"><button data-t="area">Área</button><button data-t="line">Línea</button><button data-t="candle">Velas</button></span>
         <button class="pxc-tg" data-tg="vol" aria-pressed="true">Volumen</button>
         <button class="pxc-tg" data-tg="ext" aria-pressed="true" title="Incluye operaciones antes y después del horario normal">Extendido</button>
+        <span class="pxc-zoom" role="group" aria-label="Zoom"><button data-z="out" aria-label="Alejar" title="Alejar">−</button><button data-z="in" aria-label="Acercar" title="Acercar">+</button></span>
+        <button class="pxc-tg pxc-reset" data-z="reset" hidden>Ver todo</button>
       </span>
     </div>
-    <div class="pxc-plot"><svg class="pxc-svg" role="img" aria-label="Gráfico de precio"></svg><div class="pxc-tip" hidden></div></div>
+    <div class="pxc-plot"><svg class="pxc-svg" role="img" aria-label="Gráfico de precio"></svg><div class="pxc-tip" hidden></div><div class="pxc-sel" hidden></div></div>
     <p class="pxc-foot"></p></section>`;
   const $ = (s) => root.querySelector(s), $$ = (s) => [...root.querySelectorAll(s)];
   const plot = $(".pxc-plot"), svg = $(".pxc-svg"), tip = $(".pxc-tip");
@@ -98,6 +101,9 @@ export function mountPriceChart(root, { sym, currency = "", onQuote } = {}) {
     const noOhlc = st.data && !st.data.hasOhlc;
     $$("[data-t]").forEach((b) => { b.classList.toggle("on", b.dataset.t === st.type && !(noOhlc && b.dataset.t === "candle")); b.disabled = !!(noOhlc && b.dataset.t === "candle"); b.title = b.disabled ? "Las velas necesitan conexión con Yahoo Finance (los datos guardados solo traen el cierre)" : ""; });
     $("[data-tg=vol]").setAttribute("aria-pressed", String(st.vol));
+    $("[data-z=reset]").hidden = !st.view;
+    $("[data-z=in]").disabled = !st.data || st.data.c.length < 12;
+    $("[data-z=out]").disabled = !st.view;
     const ex = $("[data-tg=ext]"); ex.setAttribute("aria-pressed", String(st.ext)); ex.hidden = !(isIntraday() && st.range !== "1M");
   };
 
@@ -115,13 +121,23 @@ export function mountPriceChart(root, { sym, currency = "", onQuote } = {}) {
     el.innerHTML = `${left}<b class="${ch >= 0 ? "pos" : "neg"}">${ch >= 0 ? "+" : "−"}${Math.abs(ch * 100).toFixed(2).replace(".", ",")} % ${d.limited ? "en los 3 años guardados" : st.range === "YTD" ? CHART_RANGES[st.range].label : "en " + CHART_RANGES[st.range].label}</b>`;
     foot.textContent = d.source === "snapshot"
       ? `Sin conexión: se muestran los datos diarios guardados${d.limited ? " (solo 3 años)" : ""}. El gráfico del día y las velas necesitan Yahoo Finance.`
-      : "Datos de Yahoo Finance; en algunas bolsas llegan con hasta 15 minutos de retraso. Toca o pasa el cursor para ver cada punto.";
+      : `Datos de Yahoo Finance; en algunas bolsas llegan con hasta 15 minutos de retraso. ${st.view ? "Arrastra para moverte · doble clic o «Ver todo» para volver." : "Arrastra sobre una zona (o pellizca) para acercarte."}`;
   }
 
   const refPrice = (d) => (st.range === "1D" && d.meta.chartPreviousClose != null ? d.meta.chartPreviousClose : d.c[0]);
 
+  // Ventana visible (zoom): recorta todas las series a [t0, t1]; con menos puntos, las velas se agrupan menos y se ve más detalle
+  function visible(full) {
+    if (!full || !st.view) return full;
+    let i0 = full.t.findIndex((t) => t >= st.view.t0), i1 = full.t.length - 1;
+    while (i1 > 0 && full.t[i1] > st.view.t1) i1--;
+    if (i0 < 0 || i1 - i0 < 5) { st.view = null; return full; }
+    const sl = (a) => a.slice(i0, i1 + 1);
+    return { ...full, t: sl(full.t), o: sl(full.o), h: sl(full.h), l: sl(full.l), c: sl(full.c), v: sl(full.v), i0, i1 };
+  }
+
   function draw() {
-    const d = st.data;
+    const full = st.data, d = visible(full), zoomed = !!(st.view && d);
     syncControls(); setStatus();
     const W = Math.max(260, Math.floor(plot.clientWidth)), H = W < 520 ? 270 : 330;
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("width", W); svg.setAttribute("height", H);
@@ -134,17 +150,17 @@ export function mountPriceChart(root, { sym, currency = "", onQuote } = {}) {
     // eje X: el día usa el horario real de la sesión; el resto reparte los puntos por igual (sin huecos de fin de semana)
     let x0 = S.t[0], x1 = S.t[n - 1];
     const cp = d.meta.currentTradingPeriod;
-    if (is1D && cp && cp.regular) {
+    if (is1D && cp && cp.regular && !zoomed) {
       const per = st.ext && cp.pre && cp.post ? [cp.pre.start, cp.post.end] : [cp.regular.start, cp.regular.end];
       const shift = Math.floor((S.t[0] - per[0]) / 86400) * 86400;
       x0 = Math.min(per[0] + shift, S.t[0]); x1 = Math.max(per[1] + shift, S.t[n - 1]);
     }
     if (x1 <= x0) x1 = x0 + 1;
     const xAt = (i) => (is1D ? L + ((S.t[i] - x0) / (x1 - x0)) * pw : L + ((i + 0.5) / n) * pw);
-    const ref = refPrice(d);
+    const ref = refPrice(full);
     let lo = Infinity, hi = -Infinity;
     for (let i = 0; i < n; i++) { const a = candle ? S.l[i] : S.c[i], b = candle ? S.h[i] : S.c[i]; if (a < lo) lo = a; if (b > hi) hi = b; }
-    lo = Math.min(lo, ref); hi = Math.max(hi, ref);
+    if (!zoomed) { lo = Math.min(lo, ref); hi = Math.max(hi, ref); } // con zoom, la escala se ajusta solo a lo visible
     const allPositive = lo > 0;
     if (hi - lo < 1e-12) { hi += Math.abs(hi) * 0.01 || 1; lo -= Math.abs(lo) * 0.01 || 1; }
     const padv = (hi - lo) * 0.07; lo -= padv; hi += padv; if (allPositive && lo < 0) lo = 0;
@@ -173,24 +189,24 @@ export function mountPriceChart(root, { sym, currency = "", onQuote } = {}) {
         const x = f1(xAt(i)), col = S.c[i] >= S.o[i] ? "var(--green)" : "var(--red)", yo = yAt(S.o[i]), yc = yAt(S.c[i]);
         g += `<line x1="${x}" x2="${x}" y1="${f1(yAt(S.h[i]))}" y2="${f1(yAt(S.l[i]))}" style="stroke:${col}" stroke-width="1"/><rect x="${f1(x - bw / 2)}" y="${f1(Math.min(yo, yc))}" width="${f1(bw)}" height="${Math.max(1, f1(Math.abs(yo - yc)))}" style="fill:${col}"/>`;
       }
-      g += `<line x1="${L}" x2="${W - R}" y1="${f1(refY)}" y2="${f1(refY)}" class="pxc-ref"/>`;
+      if (ref >= lo && ref <= hi) g += `<line x1="${L}" x2="${W - R}" y1="${f1(refY)}" y2="${f1(refY)}" class="pxc-ref"/>`;
     } else {
       if (st.type === "area") {
         const area = `M${f1(xAt(0))} ${f1(refY)}L${pts.join("L")}L${f1(xAt(n - 1))} ${f1(refY)}Z`;
         g += `<path d="${area}" clip-path="url(#${uid}a)" class="pxc-fill" style="fill:var(--green)"/><path d="${area}" clip-path="url(#${uid}b)" class="pxc-fill" style="fill:var(--red)"/>`;
       }
-      g += `<line x1="${L}" x2="${W - R}" y1="${f1(refY)}" y2="${f1(refY)}" class="pxc-ref"/>`;
+      if (ref >= lo && ref <= hi) g += `<line x1="${L}" x2="${W - R}" y1="${f1(refY)}" y2="${f1(refY)}" class="pxc-ref"/>`;
       g += `<path d="${line}" clip-path="url(#${uid}a)" class="pxc-line" style="stroke:var(--green)"/><path d="${line}" clip-path="url(#${uid}b)" class="pxc-line" style="stroke:var(--red)"/>`;
       g += `<circle cx="${f1(xAt(n - 1))}" cy="${f1(lastY)}" r="3.5" style="fill:${up ? "var(--green)" : "var(--red)"}"/>`;
     }
     // etiquetas: último precio (color) y cierre previo (neutra)
     const tag = (y, txt, bg, fg) => `<g><rect x="${W - R + 3}" y="${f1(y - 9)}" width="${R - 6}" height="18" rx="5" style="fill:${bg}"/><text x="${W - R + 3 + (R - 6) / 2}" y="${f1(y) + 4}" text-anchor="middle" class="pxc-tag" style="fill:${fg}">${txt}</text></g>`;
-    if (Math.abs(lastY - refY) > 20) g += tag(refY, fmtPriceNum(ref), "var(--text)", "var(--bg1)");
+    if (Math.abs(lastY - refY) > 20 && ref >= lo && ref <= hi) g += tag(refY, fmtPriceNum(ref), "var(--text)", "var(--bg1)");
     g += tag(Math.min(T + ph - 9, Math.max(T + 9, lastY)), fmtPriceNum(last), up ? "var(--green)" : "var(--red)", "#fff");
     // eje X
     const lab = (x, txt) => `<text x="${f1(x)}" y="${H - 7}" text-anchor="middle" class="pxc-xtx">${esc(txt)}</text>`;
     if (is1D) {
-      const off = d.meta.gmtoffset ?? 0, every = pw < 420 ? 4 * 3600 : 2 * 3600;
+      const off = d.meta.gmtoffset ?? 0, want = pw < 420 ? 3 : 5, every = [900, 1800, 3600, 7200, 14400].find((e) => (x1 - x0) / e <= want) || 14400; // marcas más finas con zoom
       for (let tt = Math.ceil((x0 + off) / every) * every - off; tt < x1; tt += every) {
         const x = L + ((tt - x0) / (x1 - x0)) * pw; if (x < L + 14 || x > W - R - 14) continue;
         g += lab(x, dtf(tz, { hour: "numeric", minute: "2-digit" }).format(tt * 1000));
@@ -201,7 +217,7 @@ export function mountPriceChart(root, { sym, currency = "", onQuote } = {}) {
     }
     g += `<g class="pxc-xh" style="display:none"><line class="pxc-xhl" y1="${T}" y2="${T + ph}"/><circle r="4.5" class="pxc-xhd"/></g>`;
     svg.innerHTML = g;
-    st.geom = { S, n, xs: Array.from({ length: n }, (_, i) => xAt(i)), yAt, ref, W, H, L, R, T, ph, candle, tz, up };
+    st.geom = { S, n, xs: Array.from({ length: n }, (_, i) => xAt(i)), yAt, ref, W, H, L, R, T, ph, pw, candle, tz, up };
   }
 
   // cursor: línea vertical + punto + detalle
@@ -224,8 +240,80 @@ export function mountPriceChart(root, { sym, currency = "", onQuote } = {}) {
     tip.style.transform = `translate(${f1(left)}px, ${f1(Math.max(4, py * (r.height / gm.H) - 54))}px)`;
   }
   const leave = () => { tip.hidden = true; const xh = svg.querySelector(".pxc-xh"); if (xh) xh.style.display = "none"; };
-  svg.addEventListener("pointermove", hover); svg.addEventListener("pointerdown", hover);
-  svg.addEventListener("pointerleave", leave); svg.addEventListener("pointercancel", leave);
+  // ---- zoom: se trabaja en índices de la serie completa (cada punto pesa igual, como el eje X) ----
+  const win = () => { const n = st.data.t.length; if (!st.view) return [0, n - 1]; const v = visible(st.data); return v && v.i0 != null ? [v.i0, v.i1] : [0, n - 1]; };
+  function setWin(a, b) {
+    const n = st.data.t.length, minW = Math.min(n - 1, 10);
+    let w = Math.max(minW, b - a);
+    if (w >= n - 1) { st.view = null; draw(); return; }
+    a = Math.max(0, Math.min(n - 1 - w, a)); b = a + w;
+    st.view = { t0: st.data.t[Math.round(a)], t1: st.data.t[Math.round(b)] }; leave(); draw();
+  }
+  function zoomAt(frac, factor) { // frac: posición 0–1 dentro del área de precio que debe quedar quieta
+    if (!st.data) return;
+    const [a, b] = win(), w = b - a, c = a + frac * w, nw = w * factor;
+    setWin(c - frac * nw, c - frac * nw + nw);
+  }
+  const fracOf = (clientX) => { const gm = st.geom, r = svg.getBoundingClientRect(); if (!gm) return 0.5; return Math.min(1, Math.max(0, (((clientX - r.left) / r.width) * gm.W - gm.L) / gm.pw)); };
+  const sel = $(".pxc-sel");
+  const ptrs = new Map();
+  let drag = null; // { mode: "select" | "pan" | "pinch", ... }
+  svg.addEventListener("pointerdown", (e) => {
+    ptrs.set(e.pointerId, e.clientX);
+    if (ptrs.size === 2 && st.data) { // pellizco con dos dedos
+      const xs = [...ptrs.values()], [a, b] = win();
+      drag = { mode: "pinch", d0: Math.max(20, Math.abs(xs[0] - xs[1])), f0: fracOf((xs[0] + xs[1]) / 2), a, b };
+      sel.hidden = true; leave(); return;
+    }
+    if (e.pointerType === "mouse" && e.button === 0 && st.data) drag = { mode: st.view ? "pan" : "select", x0: e.clientX, moved: false, win: win() };
+    else if (e.pointerType !== "mouse" && st.view && st.data) drag = { mode: "pan", x0: e.clientX, moved: false, win: win(), touch: true };
+    hover(e);
+  });
+  svg.addEventListener("pointermove", (e) => {
+    if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, e.clientX);
+    if (drag?.mode === "pinch" && ptrs.size === 2) {
+      const xs = [...ptrs.values()], d = Math.max(20, Math.abs(xs[0] - xs[1])), f = fracOf((xs[0] + xs[1]) / 2);
+      const w0 = drag.b - drag.a, c = drag.a + drag.f0 * w0, nw = w0 * (drag.d0 / d);
+      setWin(c - f * nw, c - f * nw + nw); return;
+    }
+    if (drag && (drag.mode === "select" || drag.mode === "pan")) {
+      const dx = e.clientX - drag.x0;
+      if (!drag.moved && Math.abs(dx) < 6) { hover(e); return; }
+      if (!drag.moved) { drag.moved = true; try { svg.setPointerCapture(e.pointerId); } catch (_) { /* sin captura */ } leave(); }
+      if (drag.mode === "select") {
+        const r = plot.getBoundingClientRect(), x1 = Math.min(drag.x0, e.clientX) - r.left, x2 = Math.max(drag.x0, e.clientX) - r.left;
+        sel.hidden = false; sel.style.transform = `translateX(${x1}px)`; sel.style.width = `${x2 - x1}px`;
+      } else {
+        const gm = st.geom, r = svg.getBoundingClientRect(), [a, b] = drag.win, w = b - a;
+        const di = -(dx / r.width) * gm.W / gm.pw * w;
+        setWin(a + di, b + di);
+      }
+      return;
+    }
+    hover(e);
+  });
+  const endDrag = (e) => {
+    ptrs.delete(e.pointerId);
+    if (!drag) return;
+    if (drag.mode === "select" && drag.moved) {
+      sel.hidden = true;
+      const f1x = fracOf(Math.min(drag.x0, e.clientX)), f2x = fracOf(Math.max(drag.x0, e.clientX));
+      if (f2x - f1x > 0.02) { const [a, b] = drag.win, w = b - a; setWin(a + f1x * w, a + f2x * w); }
+    }
+    if (drag.mode !== "pinch" || ptrs.size < 2) drag = null;
+  };
+  svg.addEventListener("pointerup", endDrag);
+  svg.addEventListener("pointercancel", (e) => { endDrag(e); sel.hidden = true; leave(); });
+  svg.addEventListener("pointerleave", (e) => { if (!drag) leave(); });
+  svg.addEventListener("dblclick", () => { if (st.view) { st.view = null; draw(); } });
+  // pellizco en el trackpad (llega como rueda con Ctrl) y desplazamiento horizontal cuando hay zoom; la rueda normal sigue moviendo la página
+  svg.addEventListener("wheel", (e) => {
+    if (!st.data) return;
+    if (e.ctrlKey) { e.preventDefault(); zoomAt(fracOf(e.clientX), Math.exp(e.deltaY * 0.01)); }
+    else if (st.view && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      e.preventDefault(); const gm = st.geom, [a, b] = win(), w = b - a; const di = (e.deltaX / gm.pw) * w; setWin(a + di, b + di);
+    }
+  }, { passive: false });
 
   async function load({ silent = false, force = false } = {}) {
     const my = ++seq;
@@ -245,10 +333,12 @@ export function mountPriceChart(root, { sym, currency = "", onQuote } = {}) {
 
   root.addEventListener("click", (e) => {
     const r = e.target.closest("[data-r]"), t = e.target.closest("[data-t]"), g = e.target.closest("[data-tg]");
-    if (r && !r.disabled) { st.range = r.dataset.r; savePrefs({ range: st.range, type: st.type, vol: st.vol, ext: st.ext }); st.data = null; load(); }
+    const z = e.target.closest("[data-z]");
+    if (z && !z.disabled) { if (z.dataset.z === "reset") { st.view = null; draw(); } else zoomAt(0.5, z.dataset.z === "in" ? 0.6 : 1 / 0.6); return; }
+    if (r && !r.disabled) { st.range = r.dataset.r; st.view = null; savePrefs({ range: st.range, type: st.type, vol: st.vol, ext: st.ext }); st.data = null; load(); }
     else if (t && !t.disabled) { st.type = t.dataset.t; savePrefs({ range: st.range, type: st.type, vol: st.vol, ext: st.ext }); draw(); }
     else if (g) {
-      if (g.dataset.tg === "vol") { st.vol = !st.vol; draw(); } else { st.ext = !st.ext; st.data = null; load(); }
+      if (g.dataset.tg === "vol") { st.vol = !st.vol; draw(); } else { st.ext = !st.ext; st.view = null; st.data = null; load(); }
       savePrefs({ range: st.range, type: st.type, vol: st.vol, ext: st.ext });
     }
   });
@@ -256,7 +346,7 @@ export function mountPriceChart(root, { sym, currency = "", onQuote } = {}) {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const r = e.target.closest("[data-r]"); if (!r) return;
     const ks = RANGE_KEYS.filter((k) => !(st.offline && CHART_RANGES[k].intraday)), i = ks.indexOf(r.dataset.r), nx = ks[Math.max(0, Math.min(ks.length - 1, i + (e.key === "ArrowRight" ? 1 : -1)))];
-    e.preventDefault(); st.range = nx; st.data = null; load(); setTimeout(() => $(`[data-r="${nx}"]`)?.focus({ preventScroll: true }), 0);
+    e.preventDefault(); st.range = nx; st.view = null; st.data = null; load(); setTimeout(() => $(`[data-r="${nx}"]`)?.focus({ preventScroll: true }), 0);
   });
 
   ro = new ResizeObserver(() => { if (st.data || st.geom) draw(); });
