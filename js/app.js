@@ -294,7 +294,7 @@ function renderTop(results) {
   const best = [...results].sort((a, b) => b.score - a.score)[0];
   const box = $("#top");
   if (!box) return;
-  box.innerHTML = `<h2 class="sec">La más recomendada de tu lista <small>según la señal combinada de los 5 modelos</small></h2>
+  box.innerHTML = `<h2 class="sec">La más recomendada de tu lista <small>la de tendencia más fuerte, con el riesgo medido por los 5 modelos</small></h2>
     <div class="glass card interactive hero-card rise" data-href="#/t/${encodeURIComponent(best.symbol)}">
       <div><div class="eyebrow">${esc(best.symbol)} · ${esc(best.name)}</div>
         <div class="big ${best.verdict.tone}">${esc(best.verdict.label)}</div>
