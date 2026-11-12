@@ -1,0 +1,48 @@
+# Despliegue estático en Netlify. Las rutas /yahoo/* se reenvían a Yahoo Finance desde el servidor
+# (así el navegador no tiene problemas de CORS). Si Yahoo bloqueara el servidor, la app usa los datos guardados.
+[build]
+  publish = "."
+
+[[redirects]]
+  from = "/yahoo/chart/*"
+  to = "https://query1.finance.yahoo.com/v8/finance/chart/:splat"
+  status = 200
+  force = true
+  headers = {User-Agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+
+[[redirects]]
+  from = "/yahoo/search"
+  to = "https://query1.finance.yahoo.com/v1/finance/search"
+  status = 200
+  force = true
+  headers = {User-Agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+
+[[redirects]]
+  from = "/yahoo/spark"
+  to = "https://query1.finance.yahoo.com/v8/finance/spark"
+  status = 200
+  force = true
+  headers = {User-Agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+
+[[redirects]]
+  from = "/yahoo/screener"
+  to = "https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved"
+  status = 200
+  force = true
+  headers = {User-Agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/data/*"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

@@ -1,0 +1,7 @@
+{
+  "name": "inversiones-defi",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Asistente de decisiones de inversión: Vasicek, saltos de Merton, opciones reales, manada y reversión a la media"
+}

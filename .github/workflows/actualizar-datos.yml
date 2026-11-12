@@ -1,0 +1,42 @@
+# Actualiza los datos de Horizon cada noche (gratis con GitHub Actions).
+# 1) descarga 3 años de precios de Yahoo Finance → data/snapshot.json
+# 2) recalcula el ranking de Descubrir           → data/ideas.json
+# 3) corre las pruebas de los modelos
+# 4) si todo salió bien, guarda los cambios en el repositorio; Netlify ve el cambio y publica solo.
+name: Actualizar datos
+
+on:
+  schedule:
+    - cron: "30 1 * * 2-6" # 01:30 UTC = 8:30 p. m. en Colombia, de lunes a viernes (después del cierre de Nueva York)
+  workflow_dispatch: {} # botón "Run workflow" para correrlo a mano
+
+permissions:
+  contents: write
+
+concurrency:
+  group: datos
+  cancel-in-progress: false
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Descargar precios de Yahoo Finance
+        run: node tools/build_snapshot.mjs
+      - name: Recalcular el ranking
+        run: node tools/build_ideas.mjs
+      - name: Probar los modelos
+        run: node tests/models.test.mjs
+      - name: Guardar si hubo cambios
+        run: |
+          git config user.name "horizon-bot"
+          git config user.email "horizon-bot@users.noreply.github.com"
+          git add data/snapshot.json data/ideas.json
+          if git diff --cached --quiet; then echo "Sin cambios"; exit 0; fi
+          git commit -m "Datos actualizados $(date -u +%Y-%m-%d)"
+          git push

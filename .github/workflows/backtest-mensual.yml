@@ -1,0 +1,45 @@
+# Repite el backtest de 10 años el día 1 de cada mes y actualiza el historial que muestra la app
+# (data/backtest_report.json). Tarda unos 10 minutos.
+name: Backtest mensual
+
+on:
+  schedule:
+    - cron: "0 6 1 * *" # día 1 de cada mes, 1:00 a. m. en Colombia
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: datos
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar librerías de Python
+        run: pip install pandas numpy scikit-learn
+      - name: Descargar 10 años de precios
+        run: node tools/build_history.mjs
+      - name: Reconstruir lo que Horizon habría dicho
+        run: node tools/backtest_dataset.mjs 4
+      - name: Evaluar y guardar resultados
+        run: python -X utf8 -I tools/train_model.py
+      - name: Guardar si hubo cambios
+        run: |
+          git config user.name "horizon-bot"
+          git config user.email "horizon-bot@users.noreply.github.com"
+          git pull --rebase
+          git add data/backtest_report.json
+          if git diff --cached --quiet; then echo "Sin cambios"; exit 0; fi
+          git commit -m "Backtest mensual $(date -u +%Y-%m-%d)"
+          git push

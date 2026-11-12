@@ -1,0 +1,124 @@
+
+/* ==========================================================================
+   APPLE FIEL — contenido en superficies planas sobre fondo agrupado (como Ajustes, Bolsa, Salud).
+   El vidrio queda solo para barras de navegación, avisos y menús flotantes.
+   Colores del sistema de iOS; líneas finas de 0,5 px en lugar de bordes y sombras.
+   Este bloque va al final y reemplaza a los anteriores.
+   ========================================================================== */
+[data-theme="dark"] {
+  --bg1: #000; --bg2: #000; --card: #1c1c1e; --card2: #2c2c2e; --sep: rgba(84, 84, 88, .6); --seg-thumb: #636366;
+  --text: #fff; --muted: rgba(235, 235, 245, .6); --faint: rgba(235, 235, 245, .3);
+  --chip: rgba(120, 120, 128, .24); --grid: rgba(84, 84, 88, .5); --stroke: rgba(84, 84, 88, .6); --hl: transparent; --shadow: rgba(0, 0, 0, .5);
+  --blue: #0a84ff; --green: #30d158; --red: #ff453a; --orange: #ff9f0a; --teal: #40c8e0; --yellow: #ffd60a; --bg-dot: #000;
+}
+[data-theme="light"] {
+  --bg1: #f2f2f7; --bg2: #f2f2f7; --card: #fff; --card2: #e5e5ea; --sep: rgba(60, 60, 67, .29); --seg-thumb: #fff;
+  --text: #000; --muted: rgba(60, 60, 67, .6); --faint: rgba(60, 60, 67, .3);
+  --chip: rgba(120, 120, 128, .12); --grid: rgba(60, 60, 67, .14); --stroke: rgba(60, 60, 67, .29); --hl: transparent; --shadow: rgba(0, 0, 0, .12);
+  --blue: #007aff; --green: #34c759; --red: #ff3b30; --orange: #ff9500; --teal: #2fa6bf; --yellow: #ffcc00; --bg-dot: #f2f2f7;
+}
+body { background: var(--bg1); }
+.bg, .edge { display: none !important; }
+
+/* ---- contenido: superficies planas ---- */
+.glass { background: var(--card); -webkit-backdrop-filter: none; backdrop-filter: none; border: 0; box-shadow: none; border-radius: 18px; }
+.glass::before { display: none; }
+.hero-card, .chartcard, .mcard, .guide { -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+.card { padding: 1.25rem; }
+.stock { min-height: 0; padding: 1.125rem 1.25rem; gap: .875rem; }
+.interactive { transition: background-color .2s var(--ease); }
+.interactive:hover { transform: none; box-shadow: none; }
+.interactive:active { transform: none; background: var(--card2); transition-duration: 0s; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.rise { animation-duration: .45s; animation-delay: calc(var(--i, 0) * 30ms); }
+.panel { animation-duration: .35s; }
+
+/* ---- tipografía ---- */
+h1.title { font-weight: 700; letter-spacing: -.03em; }
+.big, .guide .g-head { font-weight: 700; }
+.stock .sym, .suggest .sym { font-family: var(--font); font-weight: 600; letter-spacing: 0; }
+h2.sec { font-weight: 700; font-size: 1.375rem; }
+.eyebrow { text-transform: none; letter-spacing: 0; }
+
+/* ---- veredicto: texto de color, sin pastilla, sin borde y sin punto ---- */
+.verdict, .verdict.pos2, .verdict.pos1, .verdict.neu, .verdict.neg1, .verdict.neg2 { background: none; border: 0; padding: 0; font-size: .9375rem; font-weight: 600; letter-spacing: 0; }
+.verdict::before { display: none; }
+
+/* ---- métricas: filas con línea fina, no mosaicos de vidrio ---- */
+.kpi, .stat, .reason { background: none; border-radius: 0; border: 0; border-top: .5px solid var(--sep); padding: .75rem 0; }
+.kpis, .stats { gap: 0 1.5rem; }
+.vote { background: none; padding: .25rem 0; } .vote i { display: none; }
+.sc { background: none; border-radius: 0; border-top: .5px solid var(--sep); padding: .75rem 0; }
+.g-note { background: none; border: 0; padding: 0; font-size: .75rem; color: var(--faint); }
+.g-more { border-top: .5px solid var(--sep); }
+.disclaimer { background: none; border: 0; padding: 0 .5rem; }
+.g-in { background: var(--chip); border: 0; border-radius: 10px; }
+.g-in:focus-within { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 35%, transparent); }
+
+/* ---- controles ---- */
+.chip { background: var(--chip); border: 0; border-radius: 999px; color: var(--text); font-weight: 500; }
+.chip:hover { transform: none; }
+.back { background: none; border: 0; padding: .25rem 0; color: var(--blue); font-size: 1.0625rem; font-weight: 400; }
+.back:hover { transform: none; color: var(--blue); }
+.iconbtn { background: var(--chip); }
+.iconbtn:hover { transform: none; }
+.status { background: var(--chip); }
+.status i { box-shadow: none; animation: none; }
+.search .field { background: var(--chip); border-radius: 12px; padding: .125rem .25rem .125rem .875rem; }
+.search .go { border-radius: 9px; padding: .5rem 1rem; font-weight: 600; box-shadow: none; }
+.search .go:hover { transform: none; }
+.gauge .track { opacity: 1; box-shadow: none; }
+.gauge .thumb { background: #fff; border: 0; box-shadow: 0 1px 4px rgba(0, 0, 0, .3), 0 0 0 .5px rgba(0, 0, 0, .08); }
+
+/* ---- control segmentado de iOS ---- */
+.seg { background: var(--chip); border-radius: 9px; padding: 2px; margin-left: 0; }
+.seg a { border-radius: 7px; padding: .375rem .875rem; font-size: .8125rem; font-weight: 600; color: var(--text); }
+.seg a.on { color: var(--text); }
+.seg .ind { top: 2px; bottom: 2px; border-radius: 7px; background: var(--seg-thumb); border: 0; box-shadow: 0 3px 8px rgba(0, 0, 0, .12), 0 3px 1px rgba(0, 0, 0, .04); }
+.tab { background: var(--chip); border: 0; border-radius: 999px; color: var(--text); box-shadow: none; }
+.tab:hover { transform: none; }
+.tab.on { background: var(--text); color: var(--bg1); border: 0; box-shadow: none; }
+.tab[aria-selected="true"] { color: var(--bg1); }
+@media (max-width: 860px) {
+  .tab { background: var(--chip); border-radius: 12px; }
+  .tab.on, .tab[aria-selected="true"] { background: var(--card); color: var(--blue); box-shadow: 0 0 0 1.5px var(--blue); }
+}
+
+/* ---- barras de navegación: el único lugar con vidrio, a todo el ancho y con línea fina ---- */
+.topbar, .tabbar {
+  background: color-mix(in srgb, var(--bg1) 72%, transparent);
+  -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+  border: 0; box-shadow: none; border-radius: 0;
+}
+.topbar { position: sticky; top: 0; margin: 0; width: 100%; max-width: none; border-bottom: .5px solid var(--sep); padding: calc(.5rem + env(safe-area-inset-top, 0px)) max(1rem, calc((100% - 1180px) / 2 + .875rem)) .5rem; }
+body { padding-top: 0; }
+.brand { font-size: 1.0625rem; font-weight: 600; }
+.topbar .seg { background: none; padding: 0; margin-left: 1rem; }
+.topbar .seg a { color: var(--muted); font-weight: 500; font-size: .8125rem; padding: .375rem .75rem; }
+.topbar .seg a.on { color: var(--text); }
+.topbar .seg .ind { display: none; }
+@media (max-width: 860px) {
+  .tabbar { left: 0; right: 0; bottom: 0; justify-content: space-around; padding: .375rem .5rem calc(.375rem + env(safe-area-inset-bottom, 0px)); border-top: .5px solid var(--sep); }
+  .tabbar a { padding: .125rem .75rem; border-radius: 0; font-size: .625rem; font-weight: 500; color: #8e8e93; gap: .125rem; background: none; transform: none; }
+  .tabbar a.on { color: var(--blue); background: none; transform: none; }
+  .tabbar a:active { transform: none; opacity: .6; }
+  .toast { bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px)); }
+}
+body::before { background: #000; }
+
+/* ---- menús y avisos flotantes: vidrio de verdad ---- */
+.suggest { background: color-mix(in srgb, var(--card) 86%, transparent); -webkit-backdrop-filter: saturate(180%) blur(30px); backdrop-filter: saturate(180%) blur(30px); border: .5px solid var(--sep); border-radius: 14px; box-shadow: 0 12px 40px rgba(0, 0, 0, .25); padding: .25rem; }
+.suggest button { border-radius: 10px; }
+.toast { background: color-mix(in srgb, var(--card2) 88%, transparent); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); border: 0; box-shadow: 0 8px 30px rgba(0, 0, 0, .25); }
+
+/* ---- ranking: una sola lista agrupada con líneas finas ---- */
+.rank { gap: 0; background: var(--card); border-radius: 18px; overflow: hidden; }
+.rank .r { border-radius: 0; background: none; border-top: .5px solid var(--sep); }
+.rank .r:first-child { border-top: 0; }
+
+/* ---- "Cómo funciona": chevrón de iOS ---- */
+details.how > summary::before { content: ""; width: .5rem; height: .5rem; border: solid var(--faint); border-width: 0 2px 2px 0; border-radius: 0; background: none; transform: rotate(-45deg); transition: transform .2s var(--ease); margin: 0 .5rem 0 .25rem; flex: none; }
+details.how[open] > summary::before { content: ""; transform: rotate(45deg); }
+.mcard .ico, .mcard h3 .ico { background: none; }
+
+@media (prefers-reduced-motion: reduce) { .interactive, details.how > summary::before { transition: none; } }

@@ -1,0 +1,10 @@
+# archivos grandes del backtest (se regeneran; no se publican)
+data/history.json
+data/backtest_rows.csv
+# local
+.claude/
+__pycache__/
+*.pyc
+node_modules/
+.DS_Store
+Thumbs.db
