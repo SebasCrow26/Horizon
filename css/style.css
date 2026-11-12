@@ -754,3 +754,13 @@ a.br-l:active { opacity: .6; }
   .rank .cmp-r > span, .rank .bt-r > span { grid-area: auto !important; }
   .rank .cmp-r.h, .rank .bt-r.h { display: grid; }
 }
+
+/* ============ Revisión de colores (accesibilidad) ============ */
+/* Tema claro: variantes de "más contraste" de iOS para que el verde, el naranja y el rojo se lean sobre blanco (≥ 4,5:1).
+   También mejora el texto blanco sobre las pastillas verde y roja. */
+[data-theme="light"] { --green: #248a3d; --red: #d70015; --orange: #b25000; --teal: #0071a4; }
+/* Un color por intención: verde = comprar, naranja = esperar, rojo = vender (antes había turquesa y un naranja rojizo sueltos) */
+.verdict.pos1, .big.pos1, .guide .g-head.pos1, b.pos1 { color: var(--green); }
+.verdict.neg1, .big.neg1, .guide .g-head.neg1, b.neg1 { color: var(--red); }
+.g-warn { font-size: .8125rem; line-height: 1.4; color: var(--orange); margin: .5rem 0 0; font-weight: 500; }
+.gauge .track { background: linear-gradient(90deg, var(--red), var(--orange) 50%, var(--green)); }

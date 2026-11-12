@@ -114,7 +114,7 @@ function setStatus(series) {
 // ---------- utilidades de interfaz ----------
 const ico = (n, cls = "") => `<svg class="${cls}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 const verdictChip = (v) => `<span class="verdict ${v.tone}">${esc(v.label)}</span>`;
-const sigColor = (s) => (s >= 0.3 ? "var(--green)" : s >= 0.1 ? "var(--teal)" : s > -0.1 ? "var(--orange)" : s > -0.3 ? "#ff7a45" : "var(--red)");
+const sigColor = (s) => (s >= 0.1 ? "var(--green)" : s > -0.1 ? "var(--orange)" : "var(--red)"); // verde sube · naranja neutral · rojo baja
 const money = (x, cur) => `${fmtPrice(x)}${cur ? ` <span class="faint" style="font-size:.5em;font-weight:600">${esc(cur)}</span>` : ""}`;
 const dayChange = (s) => { const c = s.c, n = c.length; return c[n - 1] / c[n - 2] - 1; };
 
@@ -291,7 +291,9 @@ function failCard(sym, e) {
 }
 function renderTop(results) {
   if (!results.length) return;
-  const best = [...results].sort((a, b) => b.score - a.score)[0];
+  const rank = (a) => ({ buy: 4, accumulate: a.verdict.cautious ? 2 : 3, hold: 1, reduce: 0, sell: -1 }[a.verdict.key] ?? 0);
+  const best = [...results].sort((a, b) => rank(b) - rank(a) || b.score - a.score)[0];
+  const hist = track?.byVerdict?.find((x) => x.key === best.verdict.key);
   const box = $("#top");
   if (!box) return;
   box.innerHTML = `<h2 class="sec">La más recomendada de tu lista <small>la de tendencia más fuerte, con el riesgo medido por los 5 modelos</small></h2>
@@ -299,7 +301,7 @@ function renderTop(results) {
       <div><div class="eyebrow">${esc(best.symbol)} · ${esc(best.name)}</div>
         <div class="big ${best.verdict.tone}">${esc(best.verdict.label)}</div>
         <p class="explain">${esc(GUIDE[best.verdict.key][1](best))}</p>${C.gauge(best.score)}</div>
-      <div class="kpis">${kpi("Probabilidad de subir", pctPlain(best.probUp), `en ${best.horizonDays} días`)}${kpi("Precio objetivo", fmtPrice(best.target), pct(best.upside))}${kpi("Compra máxima", fmtPrice(best.priceBuy), "opciones reales")}${kpi("Piso de protección", fmtPrice(best.stop), pct(best.downside))}</div>
+      <div class="kpis">${kpi("Probabilidad de subir", pctPlain(best.probUp), `en ${best.horizonDays} días`)}${kpi("Rango probable", `${fmtPrice(best.range.lo)} – ${fmtPrice(best.range.hi)}`, "1 de cada 10 queda fuera")}${kpi("Límite de pérdida", fmtPrice(best.stop), pct(best.downside))}${kpi("Historial de la señal", hist ? `${Math.round(hist.hit * 100)} de 100` : "—", hist ? "veces subió en 3 meses" : "")}</div>
     </div>`;
 }
 const kpi = (k, v, s = "") => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
@@ -353,7 +355,7 @@ async function renderDescubrir() {
 // ----- Ranking -----
 async function renderRanking() {
   currentRoute = "ranking"; updateNav("ranking");
-  view.innerHTML = `<section class="hero rise"><div class="eyebrow">Comparador</div><h1 class="title">El <em>ranking</em> de tu lista</h1><p class="lead">Ordenado por la señal combinada de los 5 modelos, de la mejor oportunidad a la que conviene evitar.</p></section>
+  view.innerHTML = `<section class="hero rise"><div class="eyebrow">Comparador</div><h1 class="title">El <em>ranking</em> de tu lista</h1><p class="lead">Ordenado por la señal de tendencia, de la más fuerte a la más débil. El rango y el riesgo salen de los 5 modelos.</p></section>
     <div class="rank" id="rank"><div class="skeleton" style="height:70px;border-radius:24px"></div></div>${disclaimer()}`;
   const my = routeToken;
   if (!state.watch.length) {
@@ -386,11 +388,11 @@ async function renderRanking() {
 function summaryText(a) {
   const v = a.verdict.key, H = a.horizonDays;
   const base = `Probabilidad de subir en ${H} días: ${pctPlain(a.probUp)}; rango probable entre ${fmtPrice(a.range.lo)} y ${fmtPrice(a.range.hi)}.`;
-  if (v === "buy") return `Los modelos coinciden en que hoy hay un buen punto de entrada. ${base} Objetivo ${fmtPrice(a.target)} (${pct(a.upside)}) con un piso de protección en ${fmtPrice(a.stop)}.`;
-  if (v === "accumulate") return `Hay ventaja moderada a favor de comprar${a.verdict.cautious ? ", pero el riesgo de caída brusca es alto: conviene entrar por etapas" : ", mejor por etapas"}. ${base} Objetivo ${fmtPrice(a.target)} y piso en ${fmtPrice(a.stop)}.`;
-  if (v === "hold") return `No hay una ventaja clara. Si aún no la tienes, espera un precio de ${fmtPrice(a.priceBuy)} o menos; si ya la tienes, mantén con un piso en ${fmtPrice(a.stop)}. ${base}`;
-  if (v === "reduce") return `La relación riesgo-beneficio se deterioró. Considera reducir la posición y proteger ganancias. ${base} Piso de protección: ${fmtPrice(a.stop)}.`;
-  return `Los modelos señalan que el precio está en una zona desfavorable. Si la tienes, es momento de vender o proteger fuertemente; si no, evítala por ahora. ${base}`;
+  if (v === "buy") return `La tendencia es fuerte: le va mejor que a la mayoría de su mercado. ${base} Objetivo ${fmtPrice(a.target)} (${pct(a.upside)}) con un piso de protección en ${fmtPrice(a.stop)}.`;
+  if (v === "accumulate") return `La tendencia está a favor, sin ser contundente${a.verdict.cautious ? ", pero el riesgo de caída brusca es alto: conviene entrar por etapas" : ", mejor por etapas"}. ${base} Objetivo ${fmtPrice(a.target)} y piso en ${fmtPrice(a.stop)}.`;
+  if (v === "hold") return `La tendencia no da una ventaja clara. Si aún no la tienes, espera un precio de ${fmtPrice(a.priceBuy)} o menos; si ya la tienes, mantén con un piso en ${fmtPrice(a.stop)}. ${base}`;
+  if (v === "reduce") return `La tendencia se debilitó: le va peor que a su mercado. Considera reducir la posición y proteger ganancias. ${base} Piso de protección: ${fmtPrice(a.stop)}.`;
+  return `La tendencia está claramente en contra. Si la tienes, es momento de vender o proteger fuertemente; si no, evítala por ahora. ${base}`;
 }
 
 const MODEL_ICONS = { merton: "bolt", meanrev: "wave", realoptions: "tree", vasicek: "rate", herding: "crowd" };
@@ -431,7 +433,8 @@ function scenarioRows(a, amount) {
   const bad = net(a.range.lo / a.S0 - 1, rt), good = net(a.range.hi / a.S0 - 1, rt), obj = net(Math.min(Math.max(mid, a.range.lo / a.S0 - 1), a.range.hi / a.S0 - 1), rt);
   const row = (cls, t, p) => `<div class="sc ${cls}"><span>${t}</span><b>${signedMoney(amount * p)}</b><i>${pct(p, 0)}</i></div>`;
   return row("bad", "Si va mal", bad) + row("mid", hist ? "Lo típico" : "Lo esperable", obj) + row("good", "Si va bien", good) +
-    `<p class="g-cap">${rt > 0 ? `Ya descuenta costos de comprar y vender (≈ ${pctPlain(rt, 1)}, ${money0(amount * rt)}). ` : ""}“Mal” y “bien” son los extremos: pasan 1 de cada 10 veces.${hist ? ` “Lo típico” es lo que rindió en promedio esta señal en la prueba de 10 años.` : ""}</p>`;
+    (hist && obj <= 0 && mid > 0 ? `<p class="g-warn">Con estos costos (≈ ${pctPlain(rt, 1)} entre comprar y vender) la ganancia típica desaparece. Conviene buscar comisiones más bajas u operar menos veces con montos más grandes.</p>` : "") +
+    `<p class="g-cap">${rt > 0 && !(hist && obj <= 0 && mid > 0) ? `Ya descuenta costos de comprar y vender (≈ ${pctPlain(rt, 1)}, ${money0(amount * rt)}). ` : ""}“Mal” y “bien” son los extremos: pasan 1 de cada 10 veces.${hist ? ` “Lo típico” es lo que rindió en promedio esta señal en la prueba de 10 años.` : ""}</p>`;
 }
 
 // Plan concreto a partir de lo que calculan los modelos: por partes, límite de pérdida, zona de ganancia y fecha de revisión
@@ -557,7 +560,7 @@ async function renderDetail(sym) {
       <div class="big ${a.verdict.tone}">${esc(a.verdict.label)}</div>
       <p class="explain">${summaryText(a)}</p>
       ${C.gauge(a.score)}
-      <div class="row muted" style="font-size:13px;gap:18px;flex-wrap:wrap"><span>Opinión de los 5 modelos <b class="${a.verdict5.tone}">${esc(a.verdict5.label)}</b></span><span>Señal de tendencia <b style="color:var(--text)">${a.score >= 0 ? "+" : ""}${a.score.toFixed(2).replace(".", ",")}</b></span><span>Acuerdo entre modelos <b style="color:var(--text)">${pctPlain(a.agreement)}</b></span><span>Confianza <b style="color:var(--text)">${pctPlain(a.confidence)}</b></span></div>
+      <div class="row muted" style="font-size:13px;gap:18px;flex-wrap:wrap"><span>Opinión de los 5 modelos <b class="${a.verdict5.tone}">${esc(a.verdict5.label)}</b></span><span>Señal de tendencia <b style="color:var(--text)">${a.score >= 0 ? "+" : ""}${a.score.toFixed(2).replace(".", ",")}</b></span><span>Acuerdo entre los 5 modelos <b style="color:var(--text)">${pctPlain(a.agreement)}</b></span><span>Confianza <b style="color:var(--text)">${pctPlain(a.confidence)}</b></span></div>
     </div>
     <div class="kpis">
       ${kpi("Probabilidad de subir", `<span data-to="${(a.probUp * 100).toFixed(1)}" data-dec="0" data-suf=" %">0 %</span>`, `en ${a.horizonDays} días (saltos de Merton)`)}
@@ -571,10 +574,10 @@ async function renderDetail(sym) {
 
   <div class="two expert" style="margin-top:18px">
     <div class="glass card rise" style="--i:3"><h3 style="font-size:17px">¿Por qué este veredicto?</h3>
-      <div class="reasons">${a.reasons.map((r) => `<div class="reason"><span class="dot" style="background:${sigColor(r.signal)}"></span><div><b>${esc(r.name)} · señal ${r.signal >= 0 ? "+" : ""}${r.signal.toFixed(2).replace(".", ",")}</b>${esc(r.text)}</div></div>`).join("")}</div>
+      <div class="reasons">${factorNotes(a.factors).map((n) => `<div class="reason"><span class="dot" style="background:${n.up > 0 ? "var(--green)" : n.up < 0 ? "var(--red)" : "var(--faint)"}"></span><div><b>Tendencia · ${({ mom12: "último año", regime: "su mercado", relStr: "frente a su mercado", volRatio: "nervios" })[n.key] || ""}</b>${esc(n.text)}</div></div>`).join("")}${a.reasons.map((r) => `<div class="reason"><span class="dot" style="background:${sigColor(r.signal)}"></span><div><b>${esc(r.name)} · señal ${r.signal >= 0 ? "+" : ""}${r.signal.toFixed(2).replace(".", ",")}</b>${esc(r.text)}</div></div>`).join("")}</div>
       ${a.flags.length ? `<div class="flags">${a.flags.map((f) => `<div class="flag">${ico("shield")}<span>${esc(f)}</span></div>`).join("")}</div>` : ""}
     </div>
-    <div class="glass card rise" style="--i:4"><h3 style="font-size:17px">Cómo pesa cada modelo</h3><p class="muted" style="font-size:13px;margin:2px 0 12px">Barra a la derecha = empuja a comprar; a la izquierda = a vender. El peso se ajusta por la confianza de cada modelo.</p>
+    <div class="glass card rise" style="--i:4"><h3 style="font-size:17px">Qué opina cada uno de los 5 modelos</h3><p class="muted" style="font-size:13px;margin:2px 0 12px">Segunda opinión: desde el backtest ya no deciden la dirección. Barra a la derecha = sube; a la izquierda = baja.</p>
       ${a.contrib.map((c) => contribRow(c)).join("")}</div>
   </div>
 
@@ -901,7 +904,7 @@ async function renderComparar(list) {
   view.innerHTML = `<a class="back" href="javascript:history.back()">${ico("back")}Atrás</a>
     <section class="hero rise" style="padding-top:.5rem"><h1 class="title">Comparar</h1><p class="lead">Cuánto habría crecido el mismo dinero en cada activo durante el último año.</p></section>
     <div class="chips-row" id="cmp-chips">${syms.map((s, i) => `<span class="chip cmp-chip"><i style="background:${COLORS[i]}"></i>${esc(s)}${syms.length > 1 ? `<button data-cmprm="${esc(s)}" aria-label="Quitar ${esc(s)}">×</button>` : ""}</span>`).join("")}
-      ${syms.length < 4 ? `<form id="cmp-add" class="cmp-add"><input placeholder="+ Agregar (ej. MSFT)" maxlength="20" autocapitalize="characters" spellcheck="false"></form>` : ""}</div>
+      ${syms.length < 4 ? `<form id="cmp-add" class="cmp-add"><input placeholder="+ Agregar" aria-label="Agregar un símbolo para comparar, por ejemplo MSFT" maxlength="20" autocapitalize="characters" spellcheck="false"></form>` : ""}</div>
     <div class="glass chartcard rise" id="cmp-chart"><div class="skeleton" style="height:240px;border-radius:12px"></div></div>
     <div class="rank rise" id="cmp-tab" style="margin-top:14px"></div>${disclaimer()}`;
   $("#cmp-chips").addEventListener("click", (e) => { const b = e.target.closest("[data-cmprm]"); if (b) location.hash = "#/comparar/" + syms.filter((x) => x !== b.dataset.cmprm).map(encodeURIComponent).join(","); });
@@ -920,7 +923,7 @@ async function renderComparar(list) {
     const b = vals.find((v) => v != null);
     return { ...x, pts: vals.map((v) => (v == null ? null : v / b - 1)) };
   });
-  const W = 720, Hh = 260, pl = 46, pr = 12, pt = 12, pb = 26;
+  const W = Math.round(Math.min(720, Math.max(320, ($("#cmp-chart")?.clientWidth || 720) - 24))), Hh = W < 500 ? 220 : 260, pl = 46, pr = 12, pt = 12, pb = 26; // ancho real: el texto no se encoge en el celular
   const all = lines.flatMap((l) => l.pts.filter((v) => v != null));
   const lo = Math.min(0, ...all), hi = Math.max(0, ...all), pad = (hi - lo) * 0.08 || 0.05;
   const y = (v) => pt + (1 - (v - lo + pad) / (hi - lo + 2 * pad)) * (Hh - pt - pb);
@@ -960,10 +963,9 @@ function renderMetodo() {
   ];
   view.innerHTML = `<section class="hero rise"><div class="eyebrow">Transparencia</div><h1 class="title">Cómo <em>decide</em> Horizon</h1><p class="lead">La tendencia decide la dirección y cinco modelos ponen los precios y el riesgo. Abajo está la prueba con 10 años de datos.</p></section>
   ${cards.map(([k, i, c, t, idea, f, how, lim], n) => `<div class="glass mcard rise" style="--c:${c};--i:${n}"><h3><span class="ico">${ico(i)}</span>${t}</h3><p class="explain"><b>${idea}</b></p><details class="how"><summary>Cómo funciona</summary><div class="formula">${f}</div><h4>Cómo lo usamos</h4><p class="explain">${how}</p><h4>Límites</h4><p class="explain">${lim}</p></details></div>`).join("")}
-  <div class="glass mcard rise"><h3><span class="ico" style="--c:var(--blue)">${ico("trophy")}</span>El veredicto combinado</h3>
-    <p class="explain"><b>Cada modelo da una señal y una confianza. Se combinan con pesos y se traducen a un veredicto.</b></p><details class="how"><summary>Ver pesos, umbrales y datos</summary><div class="formula">S = Σ wᵢ · cᵢ · sᵢ / Σ wᵢ · pesos: ${Object.entries(WEIGHTS).map(([k, w]) => `${MODEL_NAMES[k]} ${Math.round(w * 100)} %`).join(", ")}</div>
+  <div class="glass mcard rise"><h3><span class="ico" style="--c:var(--blue)">${ico("trophy")}</span>Cómo se arma el veredicto</h3>
+    <p class="explain"><b>La tendencia decide si comprar, esperar o vender. Los cinco modelos ponen el rango, el límite de pérdida, la zona de ganancia y el nivel de riesgo.</b></p><details class="how"><summary>Ver fórmulas, umbrales y datos</summary><h4>Versión actual: la tendencia</h4><p class="explain">Desde el backtest, la dirección del veredicto la decide la <b>tendencia</b> (momentum de 12 meses frente a su canasta regional, fuerza relativa a 6 meses y si subió o bajó en el año, con un castigo si está más nerviosa de lo normal). Umbrales: Comprar ≥ 0,45 · Comprar de a poco ≥ 0,20 · Esperar · Vender una parte ≤ −0,20 · Vender ≤ −0,45. Los 5 modelos fijan el rango, el precio objetivo, la compra máxima, el piso de protección y el nivel de riesgo.</p><h4>Opinión de los 5 modelos (versión 1, hoy segunda opinión)</h4><div class="formula">S = Σ wᵢ · cᵢ · sᵢ / Σ wᵢ · pesos: ${Object.entries(WEIGHTS).map(([k, w]) => `${MODEL_NAMES[k]} ${Math.round(w * 100)} %`).join(", ")}</div>
     <p class="explain">Cada señal sᵢ se multiplica por la confianza cᵢ del modelo, de modo que un modelo poco fiable pesa menos. La suma se lleva a la escala −1 a +1 y se traduce así: <b>Comprar</b> (≥ 0,30), <b>Comprar de a poco</b> (0,12 a 0,30), <b>Esperar</b> (−0,12 a 0,12), <b>Vender una parte</b> (−0,30 a −0,12) y <b>Vender</b> (≤ −0,30). Si el riesgo de caída brusca es alto, una compra se rebaja a "Comprar con cautela". El precio objetivo mezcla el centro de Merton con el equilibrio de la reversión (según su fiabilidad).</p>
-    <p class="explain"><b>Versión 2:</b> desde el backtest, la dirección del veredicto la decide la <b>tendencia</b> (momentum de 12 meses frente a su canasta regional, fuerza relativa a 6 meses y si subió o bajó en el año, con un castigo si está más nerviosa de lo normal). Umbrales: Comprar ≥ 0,45 · Comprar de a poco ≥ 0,20 · Esperar · Vender una parte ≤ −0,20 · Vender ≤ −0,45. Los 5 modelos fijan el rango, el precio objetivo, la compra máxima, el piso de protección y el nivel de riesgo.</p>
     <h4>Datos</h4><p class="explain">Precios diarios ajustados de Yahoo Finance (3 años) para cualquier símbolo del mundo, y bonos del Tesoro de EE. UU. (^IRX, ^FVX, ^TNX, ^TYX). Si Yahoo no responde, la aplicación usa datos reales guardados de unos 100 activos y lo indica arriba a la derecha.</p></details></div>
   <div id="bt"></div>
   ${disclaimer()}`;

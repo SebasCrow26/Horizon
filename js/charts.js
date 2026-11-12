@@ -168,7 +168,7 @@ export function tailChart(m) {
 // -------- medidor de señal (HTML) --------
 export function gauge(score, small = false) {
   const x = Math.min(1, Math.max(-1, score));
-  return `<div class="gauge ${small ? "sm" : ""}" data-v="${x.toFixed(3)}" role="img" aria-label="Señal ${score.toFixed(2)} entre −1 y 1"><div class="track"></div><i class="thumb" style="left:${(((x + 1) / 2) * 100).toFixed(1)}%"></i>${small ? "" : `<span class="l">Vender</span><span class="m">Mantener</span><span class="r">Comprar</span>`}</div>`;
+  return `<div class="gauge ${small ? "sm" : ""}" data-v="${x.toFixed(3)}" role="img" aria-label="Señal ${score.toFixed(2)} entre −1 y 1"><div class="track"></div><i class="thumb" style="left:${(((x + 1) / 2) * 100).toFixed(1)}%"></i>${small ? "" : `<span class="l">Vender</span><span class="m">Esperar</span><span class="r">Comprar</span>`}</div>`;
 }
 
 // -------- cursor interactivo del gráfico de precio: sigue al puntero 1:1 --------
