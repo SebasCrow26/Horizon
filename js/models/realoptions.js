@@ -8,10 +8,21 @@
 // Salida: precio máximo al que conviene comprar, piso de protección y qué hacer ahora.
 import { clamp, nf, fmtPriceNum as fp } from "../util.js";
 
-function lattice({ V0, K, T, r, delta, sigma, type, steps = 80 }) {
-  const dt = T / steps, sq = sigma * Math.sqrt(dt);
-  const u = Math.exp(sq), d = 1 / u, disc = Math.exp(-r * dt);
-  const p = clamp((Math.exp((r - delta) * dt) - d) / (u - d), 0.001, 0.999);
+// Probabilidad neutral al riesgo del árbol CRR. Se VERIFICA que quede en (0, 1) (condición de no arbitraje d < e^{(r−δ)Δt} < u);
+// no se recorta. Si no se cumple, se aumentan los pasos (Δt más chico) hasta que se cumpla; si ni así, se avisa con un error.
+export function crrParams({ T, r, delta, sigma, steps = 80, maxSteps = 5120 }) {
+  let n = steps;
+  for (;;) {
+    const dt = T / n, sq = sigma * Math.sqrt(dt), u = Math.exp(sq), d = 1 / u;
+    const p = (Math.exp((r - delta) * dt) - d) / (u - d);
+    if (p > 0 && p < 1) return { steps: n, dt, sq, u, d, p, disc: Math.exp(-r * dt), pasosAumentados: n !== steps };
+    if (n >= maxSteps) throw new Error(`El árbol viola la condición de no arbitraje: pQ = ${p.toFixed(4)} fuera de (0, 1) incluso con ${n} pasos (r = ${r}, δ = ${delta}, σ = ${sigma}, T = ${T}).`);
+    n *= 2;
+  }
+}
+
+function lattice({ V0, K, T, r, delta, sigma, type, steps: steps0 = 80 }) {
+  const { steps, sq, p, disc } = crrParams({ T, r, delta, sigma, steps: steps0 });
   const payoff = (v) => (type === "call" ? Math.max(v - K, 0) : Math.max(K - v, 0));
   const vals = new Float64Array(steps + 1);
   for (let j = 0; j <= steps; j++) vals[j] = payoff(V0 * Math.exp((2 * j - steps) * sq));

@@ -359,3 +359,89 @@ let trackP = null;
 export function getTrackRecord() {
   return (trackP ||= fetch("data/backtest_report.json").then((r) => (r.ok ? r.json() : null)).catch(() => null));
 }
+
+// ---------- Taller de riesgo: diario con cierre sin ajustar y dividendos, cadena de opciones, sector ----------
+const dailyCache = new Map();
+const offlineErr = () => { const e = new Error("Sin conexión con Yahoo Finance"); e.code = "offline"; return e; };
+
+// Serie diaria de `years` años: cierre SIN ajustar (para S0 y cantidades), cierre ajustado (para retornos) y dividendos
+export async function getDailyFull(sym, { years = 4 } = {}) {
+  const key = `${sym}|${years}`, hit = dailyCache.get(key);
+  if (hit && Date.now() - hit.fetchedAt < 10 * 60e3) return hit;
+  if (!liveAllowed() || CFG.FORCE_SNAPSHOT) throw offlineErr();
+  let lastErr = null;
+  for (const b of liveBases()) {
+    try {
+      const j = await fetchJSON(`${b}/chart/${encodeURIComponent(sym)}?range=${years}y&interval=1d&events=div`, 25000);
+      const res = j?.chart?.result?.[0];
+      if (!res?.timestamp) throw new Error(j?.chart?.error?.description || "Sin datos");
+      const q = res.indicators?.quote?.[0]?.close || [], adj = res.indicators?.adjclose?.[0]?.adjclose || null;
+      let t = [], close = [], aj = [];
+      for (let k = 0; k < res.timestamp.length; k++) {
+        const c = q[k], a = adj ? adj[k] : c;
+        if (c == null || !isFinite(c) || c <= 0 || a == null || !isFinite(a) || a <= 0) continue;
+        t.push(res.timestamp[k]); close.push(c); aj.push(a);
+      }
+      if (t.length < 120) throw new Error("Muy pocos datos");
+      // la sesión en curso viene incompleta: se excluye para no mezclar un retorno parcial
+      const now = Date.now() / 1000, reg = res.meta?.currentTradingPeriod?.regular;
+      let parcial = false;
+      if (reg && now >= reg.start && now < reg.end && Math.floor(t[t.length - 1] / 86400) === Math.floor(now / 86400)) { t.pop(); close.pop(); aj.pop(); parcial = true; }
+      const divs = Object.values(res.events?.dividends || {}).map((d) => ({ t: d.date, amount: d.amount })).sort((x, y) => x.t - y.t);
+      const m = res.meta || {};
+      const out = { sym, name: m.longName || m.shortName || sym, cur: m.currency || "", t, close, adj: aj, divs, source: "live", sesionParcialExcluida: parcial, fetchedAt: Date.now() };
+      dailyCache.set(key, out);
+      return out;
+    } catch (e) { lastErr = e; }
+  }
+  throw new Error(`No se pudieron obtener datos de ${sym}${lastErr ? ": " + lastErr.message : ""}`);
+}
+
+// Cadena de opciones (necesita el Worker o el servidor local: Yahoo pide credencial). Devuelve los vencimientos más cercanos a 1, 3 y 6 meses.
+export async function getOptionsChain(sym, { targets = [30, 91, 182], now = Date.now() } = {}) {
+  if (!liveAllowed() || CFG.FORCE_SNAPSHOT) throw offlineErr();
+  const hoyDia = Math.floor(now / 86400000);
+  const norm = (c) => ({ contractSymbol: c.contractSymbol, strike: +c.strike, bid: Number.isFinite(c.bid) ? c.bid : 0, ask: Number.isFinite(c.ask) ? c.ask : 0, volume: c.volume ?? 0, openInterest: c.openInterest ?? 0, impliedVolatility: Number.isFinite(c.impliedVolatility) ? c.impliedVolatility : NaN });
+  let lastErr = null;
+  for (const b of liveBases()) {
+    try {
+      const j0 = await fetchJSON(`${b}/options?symbol=${encodeURIComponent(sym)}`, 25000), r0 = j0?.optionChain?.result?.[0];
+      if (!r0) throw new Error(j0?.optionChain?.error?.description || j0?.finance?.error?.description || "Sin cadena de opciones");
+      const exps = r0.expirationDates || [];
+      if (!exps.length) throw new Error("Este activo no tiene opciones listadas");
+      const lista = exps.map((e) => ({ e, dias: Math.floor(e / 86400) - hoyDia })), usados = new Set(), elegidos = [];
+      for (const obj of targets) { const c = lista.filter((x) => x.dias >= 5 && !usados.has(x.e)).sort((x, y) => Math.abs(x.dias - obj) - Math.abs(y.dias - obj))[0]; if (c) { usados.add(c.e); elegidos.push(c); } }
+      const expirations = [];
+      for (const x of elegidos) {
+        let o = r0.options?.[0]?.expirationDate === x.e ? r0.options[0] : null;
+        if (!o) { const jj = await fetchJSON(`${b}/options?symbol=${encodeURIComponent(sym)}&date=${x.e}`, 25000); o = jj?.optionChain?.result?.[0]?.options?.[0]; }
+        if (o) expirations.push({ venc: new Date(x.e * 1000).toISOString().slice(0, 10), dias: x.dias, calls: (o.calls || []).map(norm), puts: (o.puts || []).map(norm) });
+      }
+      if (!expirations.length) throw new Error("No se pudieron leer los vencimientos");
+      return { ticker: sym, hora: new Date().toISOString(), nListadas: exps.length, S0: r0.quote?.regularMarketPrice ?? null, expirations };
+    } catch (e) { lastErr = e; }
+  }
+  throw new Error(`No se pudo bajar la cadena de opciones de ${sym}${lastErr ? ": " + lastErr.message : ""}`);
+}
+
+// Sector según Yahoo (opcional: requiere el Worker o el servidor local). Devuelve null si no está disponible.
+const sectorCache = new Map();
+export async function getYahooSector(sym) {
+  if (sectorCache.has(sym)) return sectorCache.get(sym);
+  let out = null;
+  if (liveAllowed() && !CFG.FORCE_SNAPSHOT) {
+    for (const b of liveBases()) { try { const j = await fetchJSON(`${b}/sector?symbol=${encodeURIComponent(sym)}`, 15000); if (j?.sector) { out = { sector: j.sector, industry: j.industry || "" }; break; } } catch (e) { /* siguiente */ } }
+  }
+  sectorCache.set(sym, out);
+  return out;
+}
+
+// Mapa de sectores de Horizon (data/sectors.json)
+let sectorMap = null;
+export function setSectorMap(m) { sectorMap = m; }
+export async function loadSectorMap() {
+  if (sectorMap) return sectorMap;
+  try { const r = await fetch("data/sectors.json"); if (r.ok) sectorMap = (await r.json()).sectores || {}; } catch (e) { /* sin mapa */ }
+  return (sectorMap ||= {});
+}
+

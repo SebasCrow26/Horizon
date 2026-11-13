@@ -8,6 +8,7 @@ import { fmtPrice, pct, pctPlain } from "./charts.js";
 import { spring, project, rubberband, tracker } from "./motion.js";
 import { mountPriceChart } from "./pricechart.js";
 import { mountKeyStats, mountMarket, mountNews, mountStats } from "./extras.js";
+import { renderTaller } from "./taller.js";
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -1144,6 +1145,13 @@ async function renderComparar(list) {
     rows.map((r) => `<div class="r cmp-r interactive" data-href="#/t/${encodeURIComponent(r.s)}"><span class="nm"><b><i class="cmp-dot" style="background:${r.color}"></i>${esc(r.s)}</b><span>${esc(r.ser.name)}</span></span><span class="num ${r.ret >= 0 ? "pos" : "neg"}">${pct(r.ret, 0)}</span><span class="num hide-m neg">${pct(r.mdd, 0)}</span><span class="num hide-m">${Math.round(r.vol * 100)} %</span><span>${r.a ? verdictChip(r.a.verdict) : '<span class="faint">—</span>'}</span></div>`).join("");
 }
 
+// ----- Taller de riesgo (js/taller.js) -----
+function renderTallerRoute() {
+  currentRoute = "taller"; updateNav("taller");
+  const my = routeToken;
+  renderTaller({ view, ico, disclaimer, toast, alive: () => my === routeToken });
+}
+
 // ----- Método -----
 function renderMetodo() {
   currentRoute = "metodo"; updateNav("metodo");
@@ -1286,6 +1294,7 @@ function route() {
     if (h.startsWith("/t/")) renderDetail(decodeURIComponent(h.slice(3)));
     else if (path === "/portafolio") renderPortafolio(new URLSearchParams(qs || ""));
     else if (path === "/diario") renderDiario();
+    else if (path === "/taller") renderTallerRoute();
     else if (path.startsWith("/comparar/")) renderComparar(decodeURIComponent(path.slice(10)).split(","));
     else if (h === "/ranking") renderRanking();
     else if (h === "/descubrir") renderDescubrir();
